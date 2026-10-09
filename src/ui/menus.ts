@@ -266,6 +266,8 @@ export class Menus {
         <label class="f">Game speed<select id="o-speed"><option value="1">Slow (1.0×)</option><option value="1.5">Normal (1.5×)</option><option value="1.7">AoE2 Normal (1.7×)</option><option value="2">Fast (2.0×)</option><option value="3">Very fast (3.0×)</option></select></label>
         <label class="f">Sound effects<input type="range" id="o-sfx" min="0" max="1" step="0.05"></label>
         <label class="f">Music<input type="range" id="o-music" min="0" max="1" step="0.05"></label>
+        <label class="f">One-finger drag (touch)<select id="o-finger"><option value="pan">Scroll the map</option><option value="select">Box-select units</option></select></label>
+        <label class="f"><span><input type="checkbox" id="o-twist"> Twist two fingers to rotate</span></label>
         <label class="f"><span><input type="checkbox" id="o-mute"> Mute all audio</span></label>
         <label class="f"><span><input type="checkbox" id="o-hk"> Show hotkeys on buttons</span></label>
         <label class="f"><span><input type="checkbox" id="o-edge"> Edge scrolling (mouse)</span></label>
@@ -277,6 +279,8 @@ export class Menus {
     q<HTMLInputElement>('#o-sfx').value = String(pr.sfx);
     q<HTMLInputElement>('#o-music').value = String(pr.music);
     q<HTMLInputElement>('#o-mute').checked = pr.muted;
+    q<HTMLSelectElement>('#o-finger').value = pr.oneFinger;
+    q<HTMLInputElement>('#o-twist').checked = pr.twistRotate;
     q<HTMLInputElement>('#o-hk').checked = pr.showHotkeys;
     q<HTMLInputElement>('#o-edge').checked = pr.edgeScroll;
     const apply = () => {
@@ -285,6 +289,8 @@ export class Menus {
       pr.sfx = +q<HTMLInputElement>('#o-sfx').value;
       pr.music = +q<HTMLInputElement>('#o-music').value;
       pr.muted = q<HTMLInputElement>('#o-mute').checked;
+      pr.oneFinger = q<HTMLSelectElement>('#o-finger').value as typeof pr.oneFinger;
+      pr.twistRotate = q<HTMLInputElement>('#o-twist').checked;
       pr.showHotkeys = q<HTMLInputElement>('#o-hk').checked;
       pr.edgeScroll = q<HTMLInputElement>('#o-edge').checked;
       Object.assign(audioSettings, { sfx: pr.sfx, music: pr.music, muted: pr.muted });
@@ -316,7 +322,7 @@ export class Menus {
       <ul>
         <li><b>Tap</b> a unit or building to select it. <b>Double-tap</b> to select all of that type on screen.</li>
         <li>With units selected, <b>tap the ground</b> to move, <b>tap an enemy</b> to attack, <b>tap a resource</b> to gather, or <b>tap a foundation</b> to help build.</li>
-        <li><b>Drag</b> to scroll the map. <b>Pinch</b> to zoom. <b>Twist two fingers</b> to rotate the camera.</li>
+        <li><b>Two-finger drag</b> scrolls the map and <b>pinch</b> zooms. A deliberate <b>two-finger twist</b> rotates the camera. One-finger drag also scrolls (or box-selects — see Settings).</li>
         <li><b>Long-press then drag</b> (or use the dashed-box button) to box-select units.</li>
         <li>With a building selected, tap the ground to set its <b>gather point</b>. Tap a resource to send new villagers straight to work.</li>
         <li><b>Long-press any command button</b> to see what it does and how much it costs.</li>

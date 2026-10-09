@@ -14,4 +14,7 @@ if (location.hash.startsWith('#gallery')) {
   // expose for debugging in the console
   (window as unknown as { app: App }).app = app;
   if (import.meta.env.DEV) void import('./debug').then((m) => m.installDebug(app));
+  if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => { /* offline support is optional */ }); });
+  }
 }

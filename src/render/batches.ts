@@ -154,12 +154,16 @@ export class Batches {
 export interface FogUniforms {
   fogMap: { value: THREE.Texture | null };
   fogSize: { value: number };
+  cloudMap: { value: THREE.Texture | null };
+  cloudT: { value: number };
 }
 
 export function applyFog(mat: THREE.Material, u: FogUniforms) {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.fogMap = u.fogMap;
     shader.uniforms.fogSize = u.fogSize;
+    shader.uniforms.cloudMap = u.cloudMap;
+    shader.uniforms.cloudT = u.cloudT;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform float fogSize;')
       .replace('#include <project_vertex>', `#include <project_vertex>
@@ -170,11 +174,13 @@ export function applyFog(mat: THREE.Material, u: FogUniforms) {
   fogWp = modelMatrix * fogWp;
   vFogUv = fogWp.xz / fogSize;`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform sampler2D fogMap;')
+      .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform sampler2D fogMap;\nuniform sampler2D cloudMap;\nuniform float cloudT;\nuniform float fogSize;')
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
   float fogV = texture2D( fogMap, vFogUv ).r;
   if (vFogUv.x < 0.0 || vFogUv.y < 0.0 || vFogUv.x > 1.0 || vFogUv.y > 1.0) fogV = 0.0;
-  gl_FragColor.rgb *= fogV;`);
+  vec2 cuv = vFogUv * fogSize / 48.0 + vec2(cloudT * 0.006, cloudT * 0.0035);
+  float cl = texture2D( cloudMap, cuv ).r;
+  gl_FragColor.rgb *= fogV * mix(1.0, 0.8, smoothstep(0.45, 0.75, cl));`);
   };
   mat.needsUpdate = true;
 }

@@ -8,7 +8,7 @@ export class Input {
   private mode: 'none' | 'pan' | 'box' | 'pinch' | 'pending' | 'rpan' = 'none';
   private longTimer = 0;
   private lastTap = { t: 0, x: 0, y: 0 };
-  private pinch = { d: 0, a: 0, mx: 0, my: 0 };
+  private pinch = { d: 0, a: 0, mx: 0, my: 0, twist: 0, rotating: false };
   private keys = new Set<string>();
   private mouse = { x: -1, y: -1 };
   private moved = false;
@@ -47,7 +47,7 @@ export class Input {
       clearTimeout(this.longTimer);
       this.hideBox();
       const [a, b] = [...this.ptrs.values()];
-      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, twist: 0, rotating: false };
       this.mode = 'pinch';
       return;
     }
@@ -101,13 +101,18 @@ export class Input {
       const ang = Math.atan2(b.y - a.y, b.x - a.x);
       const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       const r = app.renderer!;
+      // two-finger drag pans; pinch zooms around the fingers
+      r.pan(mx - this.pinch.mx, my - this.pinch.my);
       if (this.pinch.d > 10 && d > 10) r.zoomBy(this.pinch.d / d, mx, my);
+      // rotation only after a deliberate twist, so panning never turns the camera by accident
       let da = ang - this.pinch.a;
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
-      if (Math.abs(da) < 0.5) r.rotate(-da);
-      r.pan(mx - this.pinch.mx, my - this.pinch.my);
-      this.pinch = { d, a: ang, mx, my };
+      if (Math.abs(da) < 0.5) {
+        if (this.pinch.rotating) r.rotate(-da);
+        else if (app.prefs.twistRotate && Math.abs(this.pinch.twist += da) > 0.35) { this.pinch.rotating = true; r.rotate(-this.pinch.twist); }
+      }
+      this.pinch = { ...this.pinch, d, a: ang, mx, my };
       return;
     }
     const thresh = p.type === 'mouse' ? 5 : 9;
@@ -120,7 +125,7 @@ export class Input {
           else { this.mode = 'box'; }
         } else this.mode = 'rpan';
       } else {
-        this.mode = app.mode.k === 'wall' && app.mode.sx !== undefined ? 'none' : 'pan';
+        this.mode = app.mode.k === 'wall' && app.mode.sx !== undefined ? 'none' : app.prefs.oneFinger === 'select' && app.mode.k === 'normal' ? 'box' : 'pan';
       }
     }
     if (this.mode === 'pan' || this.mode === 'rpan') app.renderer!.pan(dx, dy);

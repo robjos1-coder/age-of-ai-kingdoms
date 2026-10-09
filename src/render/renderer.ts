@@ -57,7 +57,7 @@ export class Renderer {
   hemi: THREE.HemisphereLight;
   batches: Batches;
   terrain: Terrain;
-  fog: FogUniforms = { fogMap: { value: null }, fogSize: { value: 1 } };
+  fog: FogUniforms = { fogMap: { value: null }, fogSize: { value: 1 }, cloudMap: { value: makeCloudTexture() }, cloudT: { value: 0 } };
   game: Game;
   quality: Quality = 'high';
 
@@ -73,6 +73,8 @@ export class Renderer {
   height = 1;
 
   particles: Particle[] = [];
+  /** Units are drawn a bit larger on small screens so they stay readable. */
+  unitScale = 1;
   view: ViewState;
   private teamColors: THREE.Color[] = [];
   private lastFogT = -1;
@@ -123,6 +125,7 @@ export class Renderer {
     this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis');
     for (const p of game.players) this.teamColors[p.id] = new THREE.Color(p.color);
     this.resize();
+    this.zoom = Math.max(9, Math.min(22, this.height / 34));
     // start on the human town center
     const tc = [...game.buildings.values()].find((b) => b.o === game.human && b.t === 'town_center');
     if (tc) { const [x, y] = game.bcenter(tc); this.tx = x; this.tz = y + 1; }
@@ -148,6 +151,7 @@ export class Renderer {
     const dpr = window.devicePixelRatio || 1;
     this.gl.setPixelRatio(this.quality === 'high' ? Math.min(dpr, 2) : this.quality === 'medium' ? Math.min(dpr, 1.5) : 1);
     this.gl.setSize(w, h, false);
+    this.unitScale = Math.min(w, h) < 500 ? 1.22 : 1;
     this.updateCamera();
   }
 
@@ -449,6 +453,7 @@ export class Renderer {
     const b = this.bounds;
     const inView = (x: number, y: number) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
     this.terrain.animate(this.time);
+    this.fog.cloudT.value = this.time;
     if (this.lastFogT !== g.time) {
       this.lastFogT = g.time;
       this.terrain.updateFog(g.explored, g.visible);
@@ -558,7 +563,7 @@ export class Renderer {
       const team = u.o > 0 ? this.teamColors[u.o] : null;
       const tint = u.flash && u.flash > 0 ? C_FLASH : null;
       const key = this.unitKey(u, alpha);
-      const sc = d.naval ? 1 : d.cls.includes('animal') ? 1 : 1.15;
+      const sc = (d.naval ? 1 : d.cls.includes('animal') ? 1.05 : 1.15) * this.unitScale;
       let pitch = 0;
       if (d.naval) pitch = Math.sin(this.time * 1.3 + u.id) * 0.04;
       B.add(key, x, h, y, -u.a, sc, sc, sc, team, tint, 'lit', u.dead === undefined, 0, pitch);
@@ -736,6 +741,33 @@ export class Renderer {
     this.iconRT?.dispose();
     this.gl.dispose();
   }
+}
+
+function makeCloudTexture(): THREE.DataTexture {
+  const N = 64;
+  const d = new Uint8Array(N * N * 4);
+  const rnd = (() => { let s = 7; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+  const base = new Float32Array(N * N).map(() => rnd());
+  const at = (x: number, y: number) => base[(((y % N) + N) % N) * N + (((x % N) + N) % N)];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let v = 0, w = 0;
+    for (const [s, a] of [[16, 0.6], [8, 0.3], [4, 0.1]] as const) {
+      const fx = x / s, fy = y / s, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+      const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+      const a00 = at(ix * s, iy * s), a10 = at((ix + 1) * s, iy * s), a01 = at(ix * s, (iy + 1) * s), a11 = at((ix + 1) * s, (iy + 1) * s);
+      v += ((a00 * (1 - sx) + a10 * sx) * (1 - sy) + (a01 * (1 - sx) + a11 * sx) * sy) * a;
+      w += a;
+    }
+    const c = Math.round((v / w) * 255);
+    const i = (y * N + x) * 4;
+    d[i] = d[i + 1] = d[i + 2] = c; d[i + 3] = 255;
+  }
+  const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
+  return t;
 }
 
 export { NODE_DEFS };

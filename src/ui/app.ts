@@ -43,6 +43,9 @@ export interface Prefs {
   speed: number;
   showHotkeys: boolean;
   edgeScroll: boolean;
+  /** What a one-finger drag does on touch screens (two fingers always pan/zoom). */
+  oneFinger: 'pan' | 'select';
+  twistRotate: boolean;
 }
 
 const PREFS_KEY = 'aoak-prefs';
@@ -75,7 +78,7 @@ export class App {
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
-    this.prefs = { quality: defaultQuality(), sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false };
+    this.prefs = { quality: defaultQuality(), sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
     try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
     this.hud = new Hud(this);
     this.input = new Input(this);
@@ -166,6 +169,7 @@ export class App {
       if (this.autosaveT > 60) { this.autosaveT = 0; this.saveTo(SAVE_KEYS[0]); }
     }
     this.processEvents();
+    this.ambientSounds(dt);
     this.cleanSelection();
     this.updateGhost();
     this.renderer.render(this.paused ? 1 : Math.min(1, this.acc / TICK), dt);
@@ -222,6 +226,28 @@ export class App {
       }
     }
     if (music.mode === 'battle' && g.time - this.battleT > 60) music.play('game');
+  }
+
+  private ambT = 0;
+  private ambientSounds(dt: number) {
+    this.ambT -= dt;
+    if (this.ambT > 0 || this.paused) return;
+    this.ambT = 0.35;
+    const g = this.game!, r = this.renderer!;
+    const workers: Unit[] = [];
+    for (const u of g.units.values()) {
+      if (u.anim !== 'work' || u.t !== 'villager' || u.dead !== undefined) continue;
+      if (!g.isVisible(u.x, u.y) || !r.onScreen(u.x, u.y)) continue;
+      workers.push(u);
+      if (workers.length > 12) break;
+    }
+    if (!workers.length) return;
+    const u = workers[Math.floor(Math.random() * workers.length)];
+    const k = u.task?.k === 'build' || u.task?.k === 'repair' ? 'build' : u.gk;
+    const vol = Math.min(1, 0.4 + 6 / r.zoom);
+    if (k === 'wood') play('chop', vol);
+    else if (k === 'gold' || k === 'stone') play('mine', vol);
+    else if (k === 'build') play('build', vol * 0.8);
   }
 
   private eventSound(e: GameEvent) {
