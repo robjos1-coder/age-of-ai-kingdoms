@@ -63,6 +63,8 @@ export class App {
   groups = new Map<number, number[]>();
   lastAlert: { x: number; y: number; t: number } | null = null;
   boxMode = false;
+  /** Whether the most recent pointer input was a touch (drives touch-specific UI). */
+  touchInput = isTouch();
   private acc = 0;
   private lastT = 0;
   private autosaveT = 0;
@@ -363,7 +365,7 @@ export class App {
     const m = this.mode;
     if (m.k === 'place') {
       const ok = g.canPlace(g.human, m.type, m.x, m.y) && !g.buildBlock(g.human, m.type);
-      this.view.ghost = m.set || !isTouch() ? { type: m.type, x: m.x, y: m.y, ok } : null;
+      this.view.ghost = m.set || !this.touchInput ? { type: m.type, x: m.x, y: m.y, ok } : null;
     } else if (m.k === 'wall') {
       if (m.sx !== undefined) {
         const tiles = g.wallLine(m.sx, m.sy!, m.ex ?? m.sx, m.ey ?? m.sy!);

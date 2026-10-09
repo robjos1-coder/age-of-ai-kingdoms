@@ -1577,10 +1577,23 @@ export class Game {
       if (ship.dead !== undefined || !ship.cargo || ship.o !== u.o) { this.endTask(u); return; }
       const cap = unitDef(ship.t).cargo ?? 0;
       if (ship.cargo.length >= cap) { this.endTask(u); return; }
-      const r = this.goTo(u, { x0: ship.x, y0: ship.y, x1: ship.x, y1: ship.y, range: 1.6 }, dt, speed);
-      if (r === 'blocked') {
-        if (Math.hypot(ship.x - u.x, ship.y - u.y) < 2.6) { /* close enough */ } else { this.endTask(u); return; }
-      } else if (r !== 'arrived') return;
+      const dist = Math.hypot(ship.x - u.x, ship.y - u.y);
+      if (dist > 3.2) {
+        if (u.sub !== 2 || dist > 10) {
+          u.sub = 0;
+          const r = this.goTo(u, { x0: ship.x, y0: ship.y, x1: ship.x, y1: ship.y, range: 1.6 }, dt, speed);
+          if (r === 'moving') return;
+          u.sub = 2;
+        }
+        // reached the shore but the ship is out of reach: call the ship over
+        if (!ship.task || ship.task.k === 'move') {
+          const w = nearestFree(this.grid, u.x, u.y, true, 4);
+          if (w) ship.task = { k: 'move', x: w[0], y: w[1] };
+        }
+        u.anim = 'idle';
+        u.path = null;
+        return;
+      }
       ship.cargo.push(u.id);
       u.inside = ship.id;
       u.task = null; u.q = []; u.path = null;

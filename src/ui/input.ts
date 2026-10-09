@@ -36,7 +36,10 @@ export class Input {
     if (!this.ready) return;
     e.preventDefault();
     this.app.hud.hideTip();
-    this.app.canvas.setPointerCapture?.(e.pointerId);
+    try { this.app.canvas.setPointerCapture?.(e.pointerId); } catch { /* synthetic or stale pointer */ }
+    const wasTouch = this.app.touchInput;
+    this.app.touchInput = e.pointerType !== 'mouse';
+    if (wasTouch !== this.app.touchInput) this.app.hud.updateModebar();
     const p: Ptr = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), type: e.pointerType, button: e.button };
     this.ptrs.set(e.pointerId, p);
     this.moved = false;

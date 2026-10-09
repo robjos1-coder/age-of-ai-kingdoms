@@ -13,4 +13,5 @@ if (location.hash.startsWith('#gallery')) {
   music.play('menu');
   // expose for debugging in the console
   (window as unknown as { app: App }).app = app;
+  if (import.meta.env.DEV) void import('./debug').then((m) => m.installDebug(app));
 }

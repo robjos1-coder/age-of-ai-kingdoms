@@ -124,7 +124,8 @@ export class Hud {
     bar.classList.remove('hidden');
     let label = '';
     let ok = false;
-    if (m.k === 'place') { label = isTouch() ? (m.set ? `Place ${buildingDef(m.type).name}?` : `Tap where to build the ${buildingDef(m.type).name}`) : `Click to place the ${buildingDef(m.type).name} (Shift: several)`; ok = isTouch() && m.set; }
+    const touch = this.app.touchInput;
+    if (m.k === 'place') { label = touch ? (m.set ? `Place ${buildingDef(m.type).name} here?` : `Tap where to build the ${buildingDef(m.type).name}`) : `Click to place the ${buildingDef(m.type).name} (Shift: several)`; ok = m.set && touch; }
     else if (m.k === 'wall') { label = m.sx === undefined ? 'Tap the start of the wall' : 'Tap the end of the wall, then ✓'; ok = m.sx !== undefined; }
     else label = m.label;
     bar.innerHTML = `<span>${label}</span>${ok ? '<button class="mb-btn ok" id="mb-ok">✓</button>' : ''}<button class="mb-btn no" id="mb-no">✕</button>`;
@@ -438,9 +439,9 @@ export class Hud {
       app.renderer.lookAt(w.x, w.y);
     };
     let down = false;
-    cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); down = true; cv.setPointerCapture(e.pointerId); handle(e); });
+    cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); down = true; try { cv.setPointerCapture(e.pointerId); } catch { /* ignore */ } handle(e); });
     cv.addEventListener('pointermove', (e) => { if (down && e.buttons !== 2) handle(e); });
-    cv.addEventListener('pointerup', (e) => { down = false; cv.releasePointerCapture(e.pointerId); });
+    cv.addEventListener('pointerup', (e) => { down = false; try { cv.releasePointerCapture(e.pointerId); } catch { /* ignore */ } });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
