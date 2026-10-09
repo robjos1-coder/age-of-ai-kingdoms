@@ -121,7 +121,7 @@ export class App {
         music.play('game');
         // pre-warm icons
         this.hud.prewarm();
-        requestAnimationFrame(this.frame);
+        this.startLoop();
         if (!save) this.hud.toast(`You are the ${CIVS[this.game.players[this.game.human].civ].name}. Build your economy and conquer your enemies!`, 'gold', 6000);
       } catch (e) {
         console.error(e);
@@ -135,6 +135,7 @@ export class App {
 
   stop() {
     this.running = false;
+    this.loopToken++;
     this.renderer?.dispose();
     this.renderer = null;
     this.game = null;
@@ -148,9 +149,21 @@ export class App {
     music.play('menu');
   }
 
+  private loopToken = 0;
+
+  /** Exactly one animation loop runs at a time (a new start() retires the old loop). */
+  private startLoop() {
+    const tok = ++this.loopToken;
+    const loop = (now: number) => {
+      if (tok !== this.loopToken || !this.running) return;
+      requestAnimationFrame(loop);
+      this.frame(now);
+    };
+    requestAnimationFrame(loop);
+  }
+
   private frame = (now: number) => {
     if (!this.running || !this.game || !this.renderer) return;
-    requestAnimationFrame(this.frame);
     const g = this.game;
     let dt = (now - this.lastT) / 1000;
     this.lastT = now;
@@ -626,7 +639,7 @@ export class App {
     const b = this.ownBuilding();
     const out: Cmd[] = [];
     const col = p.color;
-    const uIcon = (t: UnitKey) => `<img src="${r.icon(`u:${t}:idle:${t === 'villager' ? 'build|none|m' : ''}`, col)}">`;
+    const uIcon = (t: UnitKey) => `<img src="${r.unitIcon(t, col)}">`;
     const bIcon = (t: BuildingKey) => `<img src="${r.icon(`b:${t}:${Math.max(2, p.age)}`, col)}">`;
 
     if (units.length) {
@@ -703,7 +716,7 @@ export class App {
         const cost = techCost(p, id);
         const block = g.techBlock(me, id);
         let icon = ICON[t.icon] ?? ICON.up;
-        if (t.upgrade) icon = `<img src="${r.icon(`u:${t.upgrade[1]}:idle:`, col)}"><span class="tag" style="font-size:14px">⬆</span>`;
+        if (t.upgrade) icon = `<img src="${r.unitIcon(t.upgrade[1], col)}"><span class="tag" style="font-size:14px">⬆</span>`;
         out.push({
           key: 't-' + id, icon, name: t.name, desc: t.desc + (t.civ ? ` (${CIVS[t.civ].name} unique)` : ''), cost, disabled: block, poor: !canAfford(p, cost), age: !!t.isAge,
           act: () => {

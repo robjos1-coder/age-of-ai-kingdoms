@@ -3,11 +3,14 @@
 
 import * as THREE from 'three';
 import { MB, type Col } from './mb';
+import { buildRigged } from './people';
+import type { Rig } from './rig';
 
 export interface ModelGeo {
   base: THREE.BufferGeometry;
   team: THREE.BufferGeometry | null;
   height: number;
+  rig?: Rig;
 }
 
 const cache = new Map<string, ModelGeo>();
@@ -16,12 +19,22 @@ export function getModel(key: string): ModelGeo {
   let m = cache.get(key);
   if (m) return m;
   const mb = new MB();
-  buildModel(mb, key);
+  let rig: Rig | undefined;
+  if (key.startsWith('r:')) {
+    const [, t, v] = key.split(':');
+    rig = buildRigged(mb, t, v ?? '');
+  } else buildModel(mb, key);
   const g = mb.build();
   const bb = g.base.boundingBox!;
   let h = bb.max.y;
   if (g.team?.boundingBox) h = Math.max(h, g.team.boundingBox.max.y);
-  m = { base: g.base, team: g.team, height: h };
+  if (rig) {
+    // rigged models: height of the rest pose, ignoring hidden tagged items
+    const pos = g.base.getAttribute('position'), tag = g.base.getAttribute('aTag');
+    h = 0;
+    for (let i = 0; i < pos.count; i++) if (tag.getX(i) === 0) h = Math.max(h, pos.getY(i));
+  }
+  m = { base: g.base, team: g.team, height: h, rig };
   cache.set(key, m);
   return m;
 }
@@ -38,409 +51,7 @@ const C = {
   rope: '#c7b07a', team: '#ffffff', teamD: '#cfcfcf', glow: '#ffb347', water: '#3a7ca5',
 };
 
-// ---------------------------------------------------------------- humanoids
-
-interface Pose {
-  leg: number;
-  armR: number;
-  armL: number;
-  wrist: number;
-  wristL?: number;
-  lean: number;
-  armLx?: number;
-  armRx?: number;
-  dy?: number;
-}
-
-const P_IDLE: Pose = { leg: 0, armR: 0.25, armL: -0.1, wrist: 0.9, lean: 0 };
-
-type Hand = ((mb: MB) => void) | null;
-
-interface Human {
-  skin?: Col;
-  shirt: Col;
-  shirtTeam?: boolean;
-  pants: Col;
-  boots?: Col;
-  head?: 'hair' | 'helmet' | 'hood' | 'cap' | 'kettle' | 'samurai' | 'viking' | 'turban' | 'bun' | 'nasal' | 'great' | 'feather' | 'none';
-  hair?: Col;
-  chest?: Col;
-  cape?: boolean;
-  belt?: Col;
-  skirt?: Col;
-  robe?: Col;
-  bulk?: number;
-  right?: Hand;
-  left?: Hand;
-  shield?: { col: Col; team?: boolean; shape: 'round' | 'kite' | 'tower' };
-  beard?: Col;
-  seated?: boolean;
-}
-
-function human(mb: MB, h: Human, p: Pose) {
-  const b = h.bulk ?? 1;
-  const skin = h.skin ?? C.skin;
-  mb.push(0, p.dy ?? 0, 0);
-  // legs
-  if (!h.robe) {
-    for (const s of [-1, 1]) {
-      const sw = h.seated ? 0 : p.leg * s;
-      mb.push(0, 0.27, 0.055 * s * b, h.seated ? 0.9 * s : 0, 0, h.seated ? 1.4 : sw);
-      mb.box(0.085 * b, 0.2, 0.085 * b, h.pants, 0, -0.1, 0);
-      mb.box(0.095 * b, 0.08, 0.095 * b, h.boots ?? C.boot, 0.01, -0.23, 0);
-      mb.pop();
-    }
-  }
-  mb.push(0, 0.27, 0, 0, 0, p.lean);
-  if (h.robe) {
-    mb.cyl(0.085 * b, 0.15 * b, 0.42, 7, h.robe, 0, -0.06, 0);
-  }
-  if (h.skirt) mb.cyl(0.1 * b, 0.15 * b, 0.2, 7, h.skirt, 0, -0.06, 0);
-  // torso
-  mb.box(0.15 * b, 0.21, 0.21 * b, h.shirt, 0, 0.1, 0, { team: h.shirtTeam });
-  if (h.chest) mb.box(0.16 * b, 0.13, 0.19 * b, h.chest, 0.005, 0.13, 0);
-  if (h.belt) mb.box(0.16 * b, 0.035, 0.22 * b, h.belt, 0, 0.0, 0);
-  if (h.cape) mb.box(0.03, 0.28, 0.22 * b, C.team, -0.09, 0.03, 0, { team: true, rz: -0.12 });
-  // head
-  mb.push(0, 0.29, 0);
-  mb.box(0.13, 0.13, 0.13, skin, 0, 0, 0);
-  mb.box(0.02, 0.03, 0.03, skin, 0.07, -0.01, 0); // nose
-  mb.box(0.01, 0.018, 0.018, C.black, 0.066, 0.02, 0.03);
-  mb.box(0.01, 0.018, 0.018, C.black, 0.066, 0.02, -0.03);
-  if (h.beard) mb.box(0.05, 0.06, 0.12, h.beard, 0.05, -0.05, 0);
-  switch (h.head ?? 'hair') {
-    case 'hair': mb.box(0.14, 0.05, 0.14, h.hair ?? C.hair, -0.005, 0.06, 0); mb.box(0.04, 0.09, 0.14, h.hair ?? C.hair, -0.055, 0.02, 0); break;
-    case 'bun': mb.box(0.14, 0.05, 0.14, h.hair ?? C.hair, -0.005, 0.06, 0); mb.box(0.05, 0.12, 0.145, h.hair ?? C.hair, -0.05, 0.0, 0); mb.ball(0.045, h.hair ?? C.hair, -0.08, 0.06, 0); break;
-    case 'cap': mb.box(0.15, 0.05, 0.15, C.team, 0, 0.07, 0, { team: true }); mb.box(0.05, 0.015, 0.12, C.team, 0.08, 0.05, 0, { team: true }); break;
-    case 'hood': mb.box(0.16, 0.16, 0.16, h.robe ?? C.brown, -0.01, 0.02, 0); mb.box(0.02, 0.1, 0.1, '#3a2a1c', 0.07, -0.01, 0); break;
-    case 'helmet': mb.cyl(0.06, 0.085, 0.08, 7, C.metal, 0, 0.07, 0); mb.box(0.02, 0.07, 0.02, C.metal, 0.07, 0.0, 0); break;
-    case 'nasal': mb.cone(0.09, 0.12, 6, C.metal, 0, 0.1, 0); mb.box(0.02, 0.07, 0.02, C.dmetal, 0.075, 0.0, 0); break;
-    case 'kettle': mb.cyl(0.07, 0.08, 0.06, 8, C.dmetal, 0, 0.07, 0); mb.cyl(0.13, 0.13, 0.015, 10, C.dmetal, 0, 0.04, 0); break;
-    case 'great': mb.box(0.15, 0.17, 0.15, C.metal, 0, 0.01, 0); mb.box(0.01, 0.02, 0.1, C.black, 0.076, 0.02, 0); mb.box(0.03, 0.08, 0.03, C.team, 0, 0.12, 0, { team: true }); break;
-    case 'feather': mb.cyl(0.06, 0.085, 0.08, 7, C.metal, 0, 0.07, 0); mb.box(0.12, 0.03, 0.03, C.team, -0.06, 0.12, 0, { team: true, rz: 0.4 }); break;
-    case 'samurai': mb.cyl(0.07, 0.09, 0.07, 6, '#3a2a2a', 0, 0.07, 0); mb.box(0.02, 0.1, 0.16, '#b8902a', 0.02, 0.12, 0, { rz: -0.2 }); break;
-    case 'viking': mb.cyl(0.07, 0.085, 0.07, 7, C.dmetal, 0, 0.07, 0); mb.cone(0.02, 0.08, 4, C.white, 0, 0.11, 0.08, { rx: -0.8 }); mb.cone(0.02, 0.08, 4, C.white, 0, 0.11, -0.08, { rx: 0.8 }); break;
-    case 'turban': mb.ball(0.1, C.white, -0.01, 0.07, 0, {}, 0.6); mb.box(0.03, 0.03, 0.03, C.team, 0.07, 0.07, 0, { team: true }); break;
-    case 'none': break;
-  }
-  mb.pop();
-  // arms
-  const arm = (side: number, ang: number, wrist: number, hand: Hand, rx: number) => {
-    mb.push(0, 0.18, 0.135 * side * b, rx * side, 0, ang);
-    mb.box(0.065, 0.2, 0.065, h.chest && !h.robe ? h.chest : h.robe ?? h.shirt, 0, -0.08, 0, { team: h.shirtTeam && !h.chest && !h.robe });
-    mb.box(0.06, 0.05, 0.06, skin, 0, -0.2, 0);
-    if (hand) {
-      mb.push(0, -0.2, 0, 0, 0, wrist);
-      hand(mb);
-      mb.pop();
-    }
-    mb.pop();
-  };
-  arm(1, p.armR, p.wrist, h.right ?? null, p.armRx ?? 0);
-  let left = h.left ?? null;
-  if (h.shield) {
-    const s = h.shield;
-    left = (m) => {
-      if (s.shape === 'round') m.cyl(0.13, 0.13, 0.03, 9, s.col, 0.02, 0.02, 0.04, { rx: Math.PI / 2, team: s.team });
-      else if (s.shape === 'kite') { m.box(0.22, 0.17, 0.03, s.col, 0.02, 0.03, 0.04, { team: s.team, ry: Math.PI / 2 }); m.cone(0.09, 0.1, 4, s.col, 0.02, -0.1, 0.04, { team: s.team, rx: Math.PI }); }
-      else m.box(0.28, 0.2, 0.03, s.col, 0.02, 0.02, 0.04, { team: s.team, ry: Math.PI / 2 });
-      m.box(0.03, 0.03, 0.01, C.gold, 0.02, 0.03, 0.06);
-    };
-  }
-  arm(-1, p.armL, p.wristL ?? 0, left, p.armLx ?? 0);
-  mb.pop();
-  mb.pop();
-}
-
-// hand items (hand at origin, forward = +X when wrist = 0 and arm hanging)
-const sword = (len = 0.3, col: Col = C.metal): Hand => (m) => {
-  m.box(0.03, 0.03, 0.09, C.gold, 0.02, 0, 0);
-  m.box(len, 0.028, 0.012, col, 0.03 + len / 2, 0, 0);
-  m.box(0.05, 0.02, 0.02, C.leather, -0.02, 0, 0);
-};
-const bigSword: Hand = (m) => { m.box(0.03, 0.03, 0.12, C.gold, 0.02, 0, 0); m.box(0.48, 0.035, 0.014, C.metal, 0.27, 0, 0); m.box(0.08, 0.025, 0.025, C.leather, -0.03, 0, 0); };
-const katana: Hand = (m) => { m.box(0.02, 0.04, 0.04, C.gold, 0.02, 0, 0); m.box(0.36, 0.02, 0.01, C.white, 0.2, 0.01, 0, { rz: 0.05 }); m.box(0.08, 0.02, 0.02, C.black, -0.03, 0, 0); };
-const spear = (len = 0.75, tip: Col = C.metal): Hand => (m) => {
-  m.box(len, 0.022, 0.022, C.wood, len * 0.25, 0, 0);
-  m.cone(0.025, 0.08, 4, tip, len * 0.75 + 0.04, 0, 0, { rz: -Math.PI / 2 });
-};
-const halberd: Hand = (m) => { spear(0.8)!(m); m.box(0.06, 0.09, 0.012, C.metal, 0.56, 0.04, 0); };
-const axe = (col: Col = C.metal): Hand => (m) => { m.box(0.3, 0.025, 0.025, C.wood, 0.1, 0, 0); m.box(0.06, 0.09, 0.015, col, 0.23, 0.04, 0); };
-const throwingAxe: Hand = (m) => { m.box(0.16, 0.02, 0.02, C.wood, 0.06, 0, 0); m.box(0.05, 0.07, 0.012, C.metal, 0.13, 0.03, 0); };
-const pick: Hand = (m) => { m.box(0.3, 0.025, 0.025, C.wood, 0.1, 0, 0); m.box(0.025, 0.2, 0.02, C.dmetal, 0.24, 0, 0, { rz: 0.15 }); };
-const hammer: Hand = (m) => { m.box(0.22, 0.022, 0.022, C.wood, 0.07, 0, 0); m.box(0.05, 0.1, 0.05, C.dmetal, 0.18, 0, 0); };
-const hoe: Hand = (m) => { m.box(0.38, 0.022, 0.022, C.wood, 0.12, 0, 0); m.box(0.025, 0.08, 0.05, C.dmetal, 0.3, -0.03, 0); };
-const knife: Hand = (m) => { m.box(0.1, 0.02, 0.012, C.metal, 0.06, 0, 0); m.box(0.05, 0.025, 0.02, C.leather, -0.01, 0, 0); };
-const basket: Hand = (m) => { m.cyl(0.07, 0.05, 0.07, 7, C.straw, 0.02, 0.02, 0.06); };
-const rod: Hand = (m) => { m.box(0.5, 0.015, 0.015, C.wood, 0.2, 0, 0); };
-const bow = (big = false): Hand => (m) => {
-  const L = big ? 0.5 : 0.38;
-  m.box(L, 0.02, 0.02, C.dwood, 0, 0.0, 0.02);
-  m.box(0.06, 0.02, 0.02, C.dwood, L / 2 - 0.02, -0.03, 0.02, { rz: 0.6 });
-  m.box(0.06, 0.02, 0.02, C.dwood, -L / 2 + 0.02, -0.03, 0.02, { rz: -0.6 });
-  m.box(L, 0.006, 0.006, C.linen, 0, -0.05, 0.02);
-};
-const crossbow: Hand = (m) => { m.box(0.24, 0.035, 0.035, C.wood, 0.1, 0, 0); m.box(0.03, 0.02, 0.26, C.dwood, 0.2, 0.01, 0); };
-const gun: Hand = (m) => { m.box(0.42, 0.03, 0.03, C.dmetal, 0.15, 0, 0); m.box(0.14, 0.04, 0.035, C.wood, -0.05, -0.01, 0); };
-const relicHand: Hand = (m) => { m.box(0.1, 0.08, 0.08, C.gold, 0.06, 0.02, -0.06); };
-const staff: Hand = (m) => { m.box(0.6, 0.022, 0.022, C.wood, 0.15, 0, 0); };
-
-function poseFor(pose: string, style: 'melee' | 'spear' | 'bow' | 'xbow' | 'gun' | 'tool' | 'throw' | 'monk' | 'none'): Pose {
-  const p: Pose = { ...P_IDLE };
-  const walk = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
-  if (walk) { p.leg = 0.5 * walk; p.armL = -0.35 * walk; p.armR = 0.25 + 0.3 * walk; p.dy = 0.01; }
-  switch (style) {
-    case 'melee':
-      if (pose === 'atk1') { p.armR = 2.6; p.wrist = 0.6; p.lean = -0.1; p.armL = 0.6; }
-      if (pose === 'atk2') { p.armR = 0.7; p.wrist = -0.5; p.lean = 0.2; p.armL = 0.4; p.leg = 0.3; }
-      if (pose === 'idle' || walk) { p.armL = 0.5; p.wrist = 1.0; }
-      break;
-    case 'spear':
-      p.wrist = 1.25; p.armL = 0.4;
-      if (pose === 'atk1') { p.armR = 1.0; p.wrist = -0.6; p.lean = -0.15; }
-      if (pose === 'atk2') { p.armR = 1.5; p.wrist = -1.4; p.lean = 0.25; p.leg = 0.35; }
-      break;
-    case 'bow':
-      p.armR = -0.2; p.wrist = 0; p.armL = 0.2; p.wristL = -1.5;
-      if (pose === 'atk1' || pose === 'atk2') { p.armL = Math.PI / 2; p.wristL = 0; p.armR = Math.PI / 2 - 0.1; p.armRx = 0.6; p.lean = 0.05; }
-      if (pose === 'atk2') { p.armR = Math.PI / 2 + 0.3; p.armRx = 0.1; }
-      break;
-    case 'xbow':
-    case 'gun':
-      p.armR = 0.4; p.wrist = 0.6; p.armL = 0.6;
-      if (pose === 'atk1' || pose === 'atk2') { p.armR = 1.4; p.wrist = 0.15; p.armL = 1.4; p.armLx = -0.5; }
-      if (pose === 'atk2') p.lean = -0.1;
-      break;
-    case 'throw':
-      if (pose === 'atk1') { p.armR = 2.8; p.wrist = 0.3; p.lean = -0.15; }
-      if (pose === 'atk2') { p.armR = 1.2; p.wrist = -0.4; p.lean = 0.2; p.leg = 0.3; }
-      break;
-    case 'tool':
-      if (pose === 'work1' || pose === 'atk1') { p.armR = 2.4; p.armL = 2.2; p.wrist = 0.7; p.lean = -0.05; }
-      if (pose === 'work2' || pose === 'atk2') { p.armR = 0.6; p.armL = 0.5; p.wrist = -0.2; p.lean = 0.25; }
-      break;
-    case 'monk':
-      p.armR = 0.3; p.wrist = 1.4; p.armL = 0.3;
-      if (pose === 'work1' || pose === 'work2') { p.armR = 2.4; p.armL = 2.4; p.armRx = 0.3; p.armLx = 0.3; p.wrist = 1.6; }
-      if (pose === 'work2') { p.armRx = 0.6; p.armLx = 0.6; }
-      break;
-    case 'none': break;
-  }
-  return p;
-}
-
-// ---------------------------------------------------------------- unit models
-
-function deadWrap(mb: MB, pose: string, f: () => void, lieH = 0.08) {
-  if (pose === 'dead') { mb.push(0, lieH, 0, Math.PI / 2, 0, 0); f(); mb.pop(); }
-  else f();
-}
-
-function villager(mb: MB, pose: string, variant: string) {
-  // variant: "<gk>|<carry>|<f|m>"
-  const [gk, carry, sex] = variant.split('|');
-  const fem = sex === 'f';
-  const tool: Hand = gk === 'wood' ? axe() : gk === 'gold' || gk === 'stone' ? pick : gk === 'farm' ? hoe : gk === 'forage' ? basket : gk === 'hunt' || gk === 'sheep' ? knife : gk === 'fish' ? rod : gk === 'build' ? hammer : null;
-  let style: 'tool' | 'none' | 'throw' = gk && gk !== 'none' && gk !== 'forage' ? 'tool' : 'none';
-  if ((gk === 'hunt') && (pose === 'atk1' || pose === 'atk2')) style = 'throw';
-  const p = poseFor(pose, style);
-  if (gk === 'forage' && (pose === 'work1' || pose === 'work2')) { p.armR = 1.2 + (pose === 'work2' ? 0.4 : 0); p.armL = 1.0; p.lean = 0.35; }
-  if (gk === 'farm' && (pose === 'work1' || pose === 'work2')) { p.armR = pose === 'work1' ? 1.6 : 0.6; p.armL = p.armR - 0.2; p.wrist = pose === 'work1' ? 0.2 : -0.3; p.lean = 0.2; }
-  if (carry && carry !== 'none' && (pose === 'idle' || pose.startsWith('walk'))) { p.armL = 2.6; p.armLx = 0.3; }
-  human(mb, {
-    shirt: fem ? '#b9875a' : C.linen, shirtTeam: false, pants: fem ? '#7b5a3c' : C.brown, belt: C.team,
-    head: fem ? 'bun' : (gk === 'farm' ? 'cap' : 'hair'), hair: fem ? '#7a4a28' : C.hair, skirt: fem ? '#8c6844' : undefined,
-    right: tool,
-  }, p);
-  // team sash
-  mb.box(0.155, 0.04, 0.215, C.team, 0, 0.47 + (p.dy ?? 0), 0, { team: true });
-  if (carry && carry !== 'none') {
-    const y = 0.6 + (p.dy ?? 0);
-    if (carry === 'wood') { mb.cyl(0.035, 0.035, 0.32, 6, C.trunk, -0.02, y, -0.1, { rx: Math.PI / 2 }); mb.cyl(0.03, 0.03, 0.3, 6, '#7b5636', 0.02, y + 0.05, -0.1, { rx: Math.PI / 2 }); }
-    else if (carry === 'gold') mb.ball(0.08, C.gold, -0.02, y, -0.1);
-    else if (carry === 'stone') mb.ball(0.08, C.stone, -0.02, y, -0.1);
-    else mb.cyl(0.07, 0.055, 0.08, 7, C.straw, -0.02, y, -0.1);
-  }
-}
-
-function infantry(mb: MB, t: string, pose: string) {
-  const s = (style: Parameters<typeof poseFor>[1]) => poseFor(pose, style);
-  switch (t) {
-    case 'militia': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', right: sword(0.26), belt: C.leather }, s('melee'));
-    case 'man_at_arms': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', chest: '#8d7a5e', right: sword(0.3), shield: { col: C.team, team: true, shape: 'round' }, belt: C.leather }, s('melee'));
-    case 'long_swordsman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.metal, right: sword(0.36), shield: { col: C.team, team: true, shape: 'kite' }, belt: C.leather }, s('melee'));
-    case 'two_handed_swordsman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.metal, right: bigSword, cape: true, belt: C.leather }, s('melee'));
-    case 'champion': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: '#c9ced4', right: bigSword, cape: true, bulk: 1.1, belt: C.gold }, s('melee'));
-    case 'spearman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'cap', right: spear(0.7), belt: C.leather }, s('spear'));
-    case 'pikeman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'kettle', chest: '#8d7a5e', right: spear(0.95), belt: C.leather }, s('spear'));
-    case 'halberdier': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'kettle', chest: C.metal, right: halberd, belt: C.leather }, s('spear'));
-    case 'archer': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hood', robe: undefined, left: bow(), belt: C.leather }, s('bow'));
-    case 'crossbowman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'kettle', chest: '#8d7a5e', right: crossbow, belt: C.leather }, s('xbow'));
-    case 'arbalester': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'kettle', chest: C.metal, right: crossbow, cape: true, belt: C.leather }, s('xbow'));
-    case 'skirmisher': return human(mb, { shirt: '#9b8a62', pants: C.brown, head: 'cap', right: spear(0.4), shield: { col: C.team, team: true, shape: 'round' } }, s('throw'));
-    case 'elite_skirmisher': return human(mb, { shirt: '#9b8a62', pants: C.brown, head: 'helmet', right: spear(0.45), shield: { col: C.team, team: true, shape: 'kite' }, chest: '#8d7a5e' }, s('throw'));
-    case 'hand_cannoneer': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'feather', right: gun, belt: C.leather }, s('gun'));
-    case 'longbowman': return human(mb, { shirt: '#3d6b35', pants: C.brown, head: 'feather', left: bow(true), cape: true, belt: C.leather }, s('bow'));
-    case 'throwing_axeman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', hair: C.blond, beard: C.blond, right: throwingAxe, shield: { col: C.team, team: true, shape: 'round' } }, s('throw'));
-    case 'teutonic_knight': return human(mb, { shirt: C.white, pants: C.dmetal, head: 'great', chest: C.metal, right: bigSword, cape: true, bulk: 1.15, belt: C.black }, s('melee'));
-    case 'samurai': return human(mb, { shirt: C.team, shirtTeam: true, pants: '#2f2f3a', head: 'samurai', chest: '#7a2b25', right: katana, belt: C.gold }, s('melee'));
-    case 'berserk': return human(mb, { shirt: '#7e6a4a', pants: C.brown, head: 'viking', beard: C.blond, right: axe(), shield: { col: C.team, team: true, shape: 'round' }, bulk: 1.08 }, s('melee'));
-    case 'chu_ko_nu': return human(mb, { shirt: C.team, shirtTeam: true, pants: '#2f2f3a', head: 'kettle', right: crossbow, chest: '#8a3a2a' }, s('xbow'));
-    case 'monk': return human(mb, { shirt: '#8a6a45', pants: C.brown, head: 'hood', robe: '#8a6a45', right: staff, left: null, belt: C.team }, s('monk'));
-  }
-  return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, right: sword() }, s('melee'));
-}
-
-function horse(mb: MB, pose: string, col: Col, opts: { barding?: boolean; camel?: boolean; armor?: Col } = {}) {
-  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
-  const camel = !!opts.camel;
-  const legL = camel ? 0.42 : 0.32;
-  const bodyY = legL + 0.1;
-  for (const [x, z, ph] of [[0.2, 0.08, 1], [0.2, -0.08, -1], [-0.22, 0.08, -1], [-0.22, -0.08, 1]] as const) {
-    mb.push(x, bodyY - 0.05, z, 0, 0, 0.5 * g * ph);
-    mb.box(0.07, legL, 0.07, col, 0, -legL / 2, 0);
-    mb.box(0.075, 0.05, 0.075, C.black, 0, -legL + 0.02, 0);
-    mb.pop();
-  }
-  mb.box(0.62, 0.22, 0.2, col, 0, bodyY + 0.05, 0);
-  if (camel) mb.ball(0.13, col, -0.02, bodyY + 0.2, 0, {}, 0.8);
-  // neck & head
-  mb.box(0.12, camel ? 0.4 : 0.3, 0.11, col, 0.33, bodyY + (camel ? 0.25 : 0.2), 0, { rz: camel ? -0.25 : -0.5 });
-  mb.box(camel ? 0.22 : 0.24, 0.1, 0.1, col, camel ? 0.47 : 0.46, bodyY + (camel ? 0.45 : 0.33), 0, { rz: 0.35 });
-  mb.box(0.03, 0.06, 0.03, col, 0.38, bodyY + 0.42, 0.04);
-  mb.box(0.03, 0.06, 0.03, col, 0.38, bodyY + 0.42, -0.04);
-  if (!camel) mb.box(0.18, 0.12, 0.02, opts.barding ? C.team : C.horse2, 0.26, bodyY + 0.26, 0, { rz: -0.5, team: !!opts.barding });
-  // tail
-  mb.box(0.04, 0.22, 0.05, camel ? col : C.horse2, -0.33, bodyY - 0.02, 0, { rz: 0.4 + 0.15 * g });
-  if (opts.barding) {
-    mb.box(0.66, 0.16, 0.23, C.team, 0, bodyY + 0.0, 0, { team: true });
-    if (opts.armor) mb.box(0.24, 0.14, 0.12, opts.armor, 0.42, bodyY + 0.34, 0, { rz: 0.35 });
-  } else {
-    mb.box(0.18, 0.06, 0.22, C.team, -0.02, bodyY + 0.16, 0, { team: true });
-  }
-  return bodyY + 0.16;
-}
-
-function cavalry(mb: MB, t: string, pose: string) {
-  const riderPose = (style: Parameters<typeof poseFor>[1]) => {
-    const p = poseFor(pose === 'walk1' || pose === 'walk2' ? 'idle' : pose, style);
-    p.leg = 0;
-    return p;
-  };
-  let saddle = 0;
-  const ride = (h: Human, style: Parameters<typeof poseFor>[1]) => {
-    mb.push(-0.02, saddle - 0.25, 0);
-    human(mb, { ...h, seated: true }, riderPose(style));
-    mb.pop();
-  };
-  switch (t) {
-    case 'scout_cavalry':
-      saddle = horse(mb, pose, C.horse);
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', right: sword(0.24) }, 'melee');
-    case 'light_cavalry':
-      saddle = horse(mb, pose, C.horse3);
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', right: sword(0.28), shield: { col: C.team, team: true, shape: 'round' } }, 'melee');
-    case 'hussar':
-      saddle = horse(mb, pose, C.horse3);
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'feather', right: sword(0.32), cape: true }, 'melee');
-    case 'knight':
-      saddle = horse(mb, pose, C.horse2, { barding: true });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: C.metal, right: sword(0.32), shield: { col: C.team, team: true, shape: 'kite' } }, 'melee');
-    case 'cavalier':
-      saddle = horse(mb, pose, '#3a2a1e', { barding: true, armor: C.metal });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: C.metal, right: spear(0.8), shield: { col: C.team, team: true, shape: 'kite' } }, 'spear');
-    case 'paladin':
-      saddle = horse(mb, pose, '#e8e2d6', { barding: true, armor: C.gold });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: '#d8dde3', right: spear(0.85, C.gold), cape: true, shield: { col: C.team, team: true, shape: 'kite' } }, 'spear');
-    case 'cataphract':
-      saddle = horse(mb, pose, '#4a3426', { barding: true, armor: C.gold });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.gold, right: spear(0.8), cape: true }, 'spear');
-    case 'cavalry_archer': case 'mangudai':
-      saddle = horse(mb, pose, t === 'mangudai' ? '#7b5a3a' : C.horse);
-      return ride({ shirt: t === 'mangudai' ? '#6a4a2e' : C.team, shirtTeam: t !== 'mangudai', pants: C.brown, head: t === 'mangudai' ? 'kettle' : 'hood', left: bow() }, 'bow');
-    case 'heavy_cavalry_archer':
-      saddle = horse(mb, pose, C.horse2, { barding: true });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', chest: C.metal, left: bow() }, 'bow');
-    case 'camel_rider': case 'heavy_camel_rider':
-      saddle = horse(mb, pose, C.camel, { camel: true });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: sword(0.3), shield: t === 'heavy_camel_rider' ? { col: C.team, team: true, shape: 'round' } : undefined }, 'melee');
-    case 'mameluke':
-      saddle = horse(mb, pose, C.camel, { camel: true });
-      return ride({ shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: katana, cape: true }, 'throw');
-  }
-}
-
-function elephant(mb: MB, pose: string) {
-  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
-  for (const [x, z, ph] of [[0.32, 0.18, 1], [0.32, -0.18, -1], [-0.32, 0.18, -1], [-0.32, -0.18, 1]] as const) {
-    mb.push(x, 0.45, z, 0, 0, 0.3 * g * ph);
-    mb.cyl(0.1, 0.11, 0.45, 7, C.ele, 0, -0.22, 0);
-    mb.pop();
-  }
-  mb.box(1.0, 0.55, 0.62, C.ele, 0, 0.72, 0);
-  mb.box(0.3, 0.4, 0.42, C.ele, 0.6, 0.86, 0);
-  mb.box(0.04, 0.32, 0.26, '#7c7c7c', 0.5, 0.88, 0.28, { ry: 0.4 });
-  mb.box(0.04, 0.32, 0.26, '#7c7c7c', 0.5, 0.88, -0.28, { ry: -0.4 });
-  const tr = pose === 'atk2' ? -0.9 : pose === 'atk1' ? 0.6 : 0.1;
-  mb.push(0.76, 0.75, 0, 0, 0, tr);
-  mb.box(0.1, 0.45, 0.1, C.ele, 0.02, -0.2, 0);
-  mb.pop();
-  mb.cone(0.035, 0.28, 5, C.white, 0.82, 0.68, 0.12, { rz: -1.9 });
-  mb.cone(0.035, 0.28, 5, C.white, 0.82, 0.68, -0.12, { rz: -1.9 });
-  // howdah
-  mb.box(0.62, 0.08, 0.7, C.team, -0.05, 1.03, 0, { team: true });
-  mb.box(0.5, 0.25, 0.5, C.dwood, -0.05, 1.18, 0);
-  mb.pyramid(0.6, 0.6, 0.25, C.gold, -0.05, 1.32, 0);
-  mb.push(-0.05, 1.07, 0);
-  human(mb, { shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: spear(0.7) }, poseFor(pose.startsWith('walk') ? 'idle' : pose, 'spear'));
-  mb.pop();
-}
-
-function animal(mb: MB, t: string, pose: string) {
-  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
-  const legs = (len: number, col: Col, fx: number, bx: number, z: number, w = 0.05) => {
-    for (const [x, zz, ph] of [[fx, z, 1], [fx, -z, -1], [bx, z, -1], [bx, -z, 1]] as const) {
-      mb.push(x, len, zz, 0, 0, 0.5 * g * ph);
-      mb.box(w, len, w, col, 0, -len / 2, 0);
-      mb.pop();
-    }
-  };
-  switch (t) {
-    case 'sheep':
-      legs(0.14, C.black, 0.1, -0.1, 0.06, 0.04);
-      mb.ball(0.17, C.sheep, 0, 0.25, 0, {}, 0.75, 1);
-      mb.box(0.12, 0.1, 0.09, '#3a3533', 0.18, 0.3, 0);
-      mb.box(0.03, 0.03, 0.06, '#3a3533', 0.15, 0.34, 0.06, { rx: 0.5 });
-      mb.box(0.03, 0.03, 0.06, '#3a3533', 0.15, 0.34, -0.06, { rx: -0.5 });
-      break;
-    case 'deer':
-      legs(0.3, C.deer, 0.17, -0.17, 0.06, 0.04);
-      mb.box(0.46, 0.16, 0.15, C.deer, 0, 0.36, 0);
-      mb.box(0.08, 0.24, 0.08, C.deer, 0.24, 0.5, 0, { rz: -0.4 });
-      mb.box(0.16, 0.08, 0.08, C.deer, 0.32, 0.6, 0);
-      mb.box(0.1, 0.06, 0.12, '#f1e8d8', -0.22, 0.38, 0);
-      for (const s of [-1, 1]) { mb.box(0.02, 0.16, 0.02, '#e8dcc0', 0.28, 0.72, 0.04 * s, { rx: 0.4 * s }); mb.box(0.08, 0.02, 0.02, '#e8dcc0', 0.3, 0.75, 0.07 * s); }
-      break;
-    case 'boar':
-      legs(0.14, C.boar, 0.14, -0.14, 0.07);
-      mb.box(0.46, 0.22, 0.2, C.boar, 0, 0.25, 0);
-      mb.box(0.3, 0.06, 0.06, '#2b211b', -0.02, 0.38, 0);
-      mb.box(0.16, 0.14, 0.14, C.boar, 0.28, 0.24, 0);
-      mb.box(0.05, 0.06, 0.08, '#c08b80', 0.37, 0.22, 0);
-      mb.cone(0.015, 0.07, 4, C.white, 0.34, 0.2, 0.06, { rz: -0.6 });
-      mb.cone(0.015, 0.07, 4, C.white, 0.34, 0.2, -0.06, { rz: -0.6 });
-      break;
-    case 'wolf':
-      legs(0.2, C.wolf, 0.15, -0.15, 0.05, 0.045);
-      mb.box(0.42, 0.15, 0.14, C.wolf, 0, 0.3, 0);
-      mb.box(0.14, 0.13, 0.12, C.wolf, 0.25, 0.36, 0);
-      mb.box(0.1, 0.06, 0.07, '#5d5d60', 0.35, 0.33, 0);
-      mb.cone(0.03, 0.07, 4, C.wolf, 0.23, 0.46, 0.04);
-      mb.cone(0.03, 0.07, 4, C.wolf, 0.23, 0.46, -0.04);
-      mb.box(0.2, 0.05, 0.05, C.wolf, -0.27, 0.3, 0, { rz: -0.5 });
-      break;
-  }
-}
+// ---------------------------------------------------------------- siege & ships (people and animals are rigged: see people.ts)
 
 function wheels(mb: MB, xs: number[], z: number, r: number) {
   for (const x of xs) for (const s of [-1, 1]) {
@@ -581,28 +192,14 @@ function ship(mb: MB, t: string, pose: string) {
   }
 }
 
-function monk(mb: MB, pose: string, variant: string) {
-  human(mb, { shirt: '#8a6a45', pants: C.brown, head: 'hood', robe: '#8a6a45', right: variant === 'relic' ? relicHand : staff, belt: C.team }, poseFor(pose, 'monk'));
-  mb.box(0.16, 0.05, 0.22, C.team, 0, 0.45, 0, { team: true });
-}
-
 function buildUnit(mb: MB, t: string, pose: string, variant: string) {
   const naval = ['fishing_ship', 'transport_ship', 'galley', 'war_galley', 'galleon', 'fire_galley', 'cannon_galleon', 'trade_cog'];
   if (naval.includes(t)) {
     if (pose === 'dead') { mb.push(0, -0.25, 0, 0.6, 0, 0.3); ship(mb, t, 'idle'); mb.pop(); return; }
     return ship(mb, t, pose);
   }
-  if (t === 'villager') return deadWrap(mb, pose, () => villager(mb, pose === 'dead' ? 'idle' : pose, variant));
-  if (t === 'monk') return deadWrap(mb, pose, () => monk(mb, pose === 'dead' ? 'idle' : pose, variant));
-  if (['sheep', 'deer', 'boar', 'wolf'].includes(t)) return deadWrap(mb, pose, () => animal(mb, t, pose === 'dead' ? 'idle' : pose), 0.12);
-  if (['battering_ram', 'capped_ram', 'mangonel', 'onager', 'scorpion', 'heavy_scorpion', 'trebuchet', 'bombard_cannon'].includes(t)) {
-    if (pose === 'dead') { mb.push(0, -0.05, 0, 0.35, 0, 0.2); siege(mb, t, 'idle', variant); mb.pop(); return; }
-    return siege(mb, t, pose, variant);
-  }
-  if (t === 'war_elephant') return deadWrap(mb, pose, () => elephant(mb, pose === 'dead' ? 'idle' : pose), 0.3);
-  const cav = ['scout_cavalry', 'light_cavalry', 'hussar', 'knight', 'cavalier', 'paladin', 'cataphract', 'cavalry_archer', 'heavy_cavalry_archer', 'mangudai', 'camel_rider', 'heavy_camel_rider', 'mameluke'];
-  if (cav.includes(t)) return deadWrap(mb, pose, () => cavalry(mb, t, pose === 'dead' ? 'idle' : pose), 0.2);
-  return deadWrap(mb, pose, () => infantry(mb, t, pose === 'dead' ? 'idle' : pose));
+  if (pose === 'dead') { mb.push(0, -0.05, 0, 0.35, 0, 0.2); siege(mb, t, 'idle', variant); mb.pop(); return; }
+  return siege(mb, t, pose, variant);
 }
 
 // ---------------------------------------------------------------- buildings

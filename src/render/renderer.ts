@@ -5,6 +5,8 @@ import { unitStats, buildingStats } from '../sim/stats';
 import type { Building, GameEvent, Unit } from '../sim/types';
 import { Batches, applyFog, type FogUniforms, type MatKind } from './batches';
 import { getModel } from './models';
+import { MOUNTED, QUADS, RIGGED, TAG } from './people';
+import { CLIP, QCLIP, makeRigMaterial } from './rig';
 import { Terrain, WATER_Y } from './terrain';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -119,7 +121,7 @@ export class Renderer {
       overlay: new THREE.MeshBasicMaterial({ depthTest: false, depthWrite: false, transparent: true }),
       ghost: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5, depthWrite: false }),
     };
-    this.batches = new Batches(this.scene, this.mats);
+    this.batches = new Batches(this.scene, this.mats, this.fog);
     this.batches.setShadows(quality !== 'low');
     this.biome = game.settings.mapType === 'oasis' ? 'palm' : '';
     this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis');
@@ -372,6 +374,94 @@ export class Renderer {
     return `u:${u.t}:${pose}:${variant}`;
   }
 
+  // ------------------------------------------------------------------ skeletal animation selection
+
+  private walkPh = new Map<number, { ph: number; x: number; y: number }>();
+
+  /** Rigged model key for a unit (villagers come in several looks). */
+  rigKey(u: Unit) {
+    if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${u.id % 3}`;
+    return `r:${u.t}:`;
+  }
+
+  private animFor(u: Unit, x: number, y: number) {
+    const g = this.game;
+    const d = unitDef(u.t);
+    const mounted = MOUNTED.has(u.t);
+    const quad = QUADS.has(u.t);
+    const idPh = (u.id * 0.6180339) % 1;
+    let clip: number = CLIP.IDLE, t = this.time * 0.22 + idPh;
+    let mclip: number = QCLIP.IDLE, mt = this.time * 0.35 + idPh;
+    let s0 = 0, s1 = 0, roll = 0, sink = 0;
+    // walk phase follows the distance actually travelled, so feet never slide
+    let w = this.walkPh.get(u.id);
+    if (!w) { w = { ph: idPh, x, y }; this.walkPh.set(u.id, w); }
+    const moved = Math.hypot(x - w.x, y - w.y);
+    w.x = x; w.y = y;
+    const speed = u.o > 0 ? unitStats(g.players[u.o], u.t).speed : d.speed;
+    const gallop = (mounted || quad) && speed > 1.15 && u.t !== 'war_elephant';
+    const stride = quad ? (u.t === 'sheep' ? 0.32 : gallop ? 0.9 : 0.5) : mounted ? (u.t === 'war_elephant' ? 1.2 : gallop ? 1.5 : 0.8) : 0.62;
+    if (moved < 1) w.ph += moved / stride;
+    // villager tool & load
+    if (u.t === 'villager') {
+      const job = u.task?.k === 'build' || u.task?.k === 'repair' ? 'build' : u.gk;
+      s0 = job === 'wood' ? TAG.AXE : job === 'gold' || job === 'stone' ? TAG.PICK : job === 'farm' ? TAG.HOE : job === 'build' ? TAG.HAMMER
+        : job === 'hunt' || job === 'sheep' ? (u.anim === 'attack' ? TAG.SPEAR : TAG.KNIFE) : job === 'fish' ? TAG.ROD : job === 'forage' ? TAG.BASKET : 0;
+      if (u.ca > 0.5 && u.ct) s1 = u.ct === 'wood' ? TAG.C_WOOD : u.ct === 'gold' ? TAG.C_GOLD : u.ct === 'stone' ? TAG.C_STONE : TAG.C_FOOD;
+    }
+    if (u.t === 'monk' && u.relic) s1 = TAG.RELIC;
+    if (u.dead !== undefined) {
+      clip = quad ? QCLIP.DEAD : CLIP.DEAD;
+      mclip = QCLIP.DEAD;
+      const k = Math.min(1, u.dead / 0.5);
+      roll = (u.id % 2 ? 1 : -1) * k * k * 1.45;
+      sink = (quad || mounted ? 0.05 : 0.02) * k + Math.max(0, u.dead - 10) * 0.06 * (u.food === undefined ? 1 : 0);
+    } else if (u.anim === 'walk') {
+      if (quad) { clip = gallop ? QCLIP.GALLOP : QCLIP.WALK; t = w.ph; }
+      else {
+        clip = s1 && s1 !== TAG.RELIC ? CLIP.CARRY : mounted ? CLIP.IDLE : CLIP.WALK;
+        t = mounted ? this.time * 0.3 + idPh : w.ph;
+        mclip = gallop ? QCLIP.GALLOP : QCLIP.WALK;
+        mt = w.ph;
+      }
+    } else if (u.anim === 'attack') {
+      const since = g.time - (u.swing ?? -99);
+      const reload = u.o > 0 ? unitStats(g.players[u.o], u.t).reload : d.reload;
+      const dur = Math.max(0.35, Math.min(0.95, reload * 0.8));
+      if (quad) { if (since < dur) { clip = QCLIP.ATTACK; t = since / dur; } }
+      else if (since < dur) { clip = this.attackClip(u); t = since / dur; }
+      else clip = CLIP.READY;
+    } else if (u.anim === 'work') {
+      if (u.t === 'monk') { clip = u.task?.k === 'heal' ? CLIP.HEAL : CLIP.PRAY; t = this.time * 0.5 + idPh; }
+      else {
+        const job = u.task?.k === 'build' || u.task?.k === 'repair' ? 'build' : u.gk;
+        if (job === 'wood' || job === 'gold' || job === 'stone') { clip = CLIP.CHOP; t = this.time * 0.85 + idPh; }
+        else if (job === 'farm') { clip = CLIP.HOE; t = this.time * 0.55 + idPh; }
+        else if (job === 'build') { clip = CLIP.HAMMER; t = this.time * 1.3 + idPh; }
+        else { clip = CLIP.FORAGE; t = this.time * 0.9 + idPh; }
+      }
+    }
+    if (this.walkPh.size > 4000) this.walkPh.clear();
+    return { key: this.rigKey(u), clip, t, mclip, mt, s0, s1, roll, sink };
+  }
+
+  private attackClip(u: Unit): number {
+    const d = unitDef(u.t);
+    if (u.t === 'villager') return u.gk === 'hunt' ? CLIP.THROW : CLIP.SWING;
+    if (u.t === 'monk') return CLIP.PRAY;
+    if (d.proj === 'axe' || u.t === 'skirmisher' || u.t === 'elite_skirmisher') return CLIP.THROW;
+    if (d.proj === 'arrow' && !['crossbowman', 'arbalester'].includes(u.t)) return CLIP.BOW;
+    if (d.proj === 'arrow' || d.proj === 'bolt' || d.proj === 'bullet') return CLIP.AIM;
+    if (d.cls.includes('spear') || ['cavalier', 'paladin', 'cataphract', 'war_elephant'].includes(u.t)) return CLIP.THRUST;
+    return CLIP.SWING;
+  }
+
+  /** Portrait / button icon for a unit type. */
+  unitIcon(t: string, color: string, size = 96, variant = '') {
+    if (RIGGED.has(t)) return this.icon(t === 'villager' ? `r:villager:${variant || 'm0'}` : `r:${t}:`, color, size);
+    return this.icon(`u:${t}:idle:${t === 'trebuchet' ? 'packed' : ''}`, color, size);
+  }
+
   // ------------------------------------------------------------------ events → particles
 
   handleEvent(e: GameEvent) {
@@ -562,11 +652,18 @@ export class Renderer {
       if (u.dead !== undefined && u.food === undefined) h -= Math.max(0, u.dead - 10) * 0.06;
       const team = u.o > 0 ? this.teamColors[u.o] : null;
       const tint = u.flash && u.flash > 0 ? C_FLASH : null;
-      const key = this.unitKey(u, alpha);
-      const sc = (d.naval ? 1 : d.cls.includes('animal') ? 1.05 : 1.15) * this.unitScale;
-      let pitch = 0;
-      if (d.naval) pitch = Math.sin(this.time * 1.3 + u.id) * 0.04;
-      B.add(key, x, h, y, -u.a, sc, sc, sc, team, tint, 'lit', u.dead === undefined, 0, pitch);
+      let key: string;
+      const sc = (d.naval ? 1 : d.cls.includes('animal') ? 1.05 : 1.1) * this.unitScale;
+      if (RIGGED.has(u.t)) {
+        const an = this.animFor(u, x, y);
+        key = an.key;
+        B.addRig(key, x, h - an.sink, y, -u.a, sc, team, tint, an.clip, an.t, an.mclip, an.mt, an.s0, an.s1, an.roll, u.dead === undefined);
+      } else {
+        key = this.unitKey(u, alpha);
+        let pitch = 0;
+        if (d.naval) pitch = Math.sin(this.time * 1.3 + u.id) * 0.04;
+        B.add(key, x, h, y, -u.a, sc, sc, sc, team, tint, 'lit', u.dead === undefined, 0, pitch);
+      }
       if (u.t === 'sheep' && u.o > 0 && u.dead === undefined) {
         // tinted collar
         B.add('fx:disc', x, h + 0.02, y, 0, 0.12, 1, 0.12, null, team, 'unlit', false);
@@ -692,15 +789,41 @@ export class Renderer {
     const dl = new THREE.DirectionalLight('#fff4e0', 2.6);
     dl.position.set(-2, 4, 3);
     scene.add(dl);
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    const tmat = new THREE.MeshLambertMaterial({ vertexColors: true, color: new THREE.Color(color) });
+    let mat: THREE.Material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    let tmat: THREE.Material = new THREE.MeshLambertMaterial({ vertexColors: true, color: new THREE.Color(color) });
+    let base = m.base, team = m.team;
+    if (m.rig) {
+      const rig = m.rig;
+      mat = makeRigMaterial(rig, null);
+      const tm = makeRigMaterial(rig, null);
+      tm.color = new THREE.Color(color);
+      tmat = tm;
+      const prep = (g: THREE.BufferGeometry) => {
+        const c = new THREE.BufferGeometry();
+        for (const k of ['position', 'normal', 'color', 'aBone', 'aTag']) c.setAttribute(k, g.getAttribute(k));
+        const n = g.getAttribute('position').count;
+        const an = new Float32Array(n * 4), sh = new Float32Array(n * 2);
+        const armed = rig.style > 0 || rig.mounted;
+        for (let i = 0; i < n; i++) {
+          an[i * 4] = rig.quad ? QCLIP.IDLE : armed ? CLIP.READY : CLIP.IDLE;
+          an[i * 4 + 2] = QCLIP.IDLE;
+          sh[i * 2] = key.includes('villager') ? TAG.HAMMER : 0;
+        }
+        c.setAttribute('aAnim', new THREE.BufferAttribute(an, 4));
+        c.setAttribute('aShow', new THREE.BufferAttribute(sh, 2));
+        return c;
+      };
+      base = prep(m.base);
+      team = m.team ? prep(m.team) : null;
+    }
     const grp = new THREE.Group();
-    grp.add(new THREE.Mesh(m.base, mat));
-    if (m.team) grp.add(new THREE.Mesh(m.team, tmat));
+    grp.add(new THREE.Mesh(base, mat));
+    if (team) grp.add(new THREE.Mesh(team, tmat));
     grp.rotation.y = -0.6;
     scene.add(grp);
     const box = new THREE.Box3().setFromObject(grp);
     box.min.y = Math.max(box.min.y, -0.05);
+    if (m.rig) box.max.y = Math.min(box.max.y, m.height + 0.05);
     const ctr = box.getCenter(new THREE.Vector3());
     const sz = box.getSize(new THREE.Vector3());
     const r = Math.max(sz.x * 0.8, sz.y, sz.z * 0.8) * 0.56;

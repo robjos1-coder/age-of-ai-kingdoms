@@ -89,7 +89,7 @@ export class Hud {
     const r = this.app.renderer!;
     const g = this.app.game!;
     const col = g.players[g.human].color;
-    r.icon('u:villager:idle:build|none|m', col);
+    r.unitIcon('villager', col);
     for (const t of ['house', 'mill', 'lumber_camp', 'mining_camp', 'farm', 'barracks'] as const) r.icon(`b:${t}:2`, col);
   }
 
@@ -297,7 +297,7 @@ export class Hud {
       const items = sel.slice(0, max).map((e) => {
         if (e.k === 'u') {
           const st = e.o > 0 ? unitStats(g.players[e.o], e.t) : unitDef(e.t);
-          return `<div class="mu" data-id="${e.id}"><img src="${r.icon(this.unitIconKey(e), g.players[e.o]?.color ?? '#888', 64)}"><div class="h"><i style="width:${Math.max(0, (e.hp / st.hp) * 100)}%"></i></div></div>`;
+          return `<div class="mu" data-id="${e.id}"><img src="${this.unitIconSrc(e, 64)}"><div class="h"><i style="width:${Math.max(0, (e.hp / st.hp) * 100)}%"></i></div></div>`;
         }
         if (e.k === 'b') return `<div class="mu" data-id="${e.id}"><img src="${r.icon(`b:${e.t}:2`, g.players[e.o].color, 64)}"></div>`;
         return '';
@@ -320,7 +320,7 @@ export class Hud {
       this.infoKey = key;
       const ownerTxt = e.o === 0 ? 'Gaia' : `${owner.name} · ${CIVS[owner.civ].name}`;
       const food = e.food !== undefined && (e.dead !== undefined || d.cls.includes('animal')) ? ` · Food ${Math.floor(e.food)}` : '';
-      html = `<div class="portrait"><img src="${r.icon(this.unitIconKey(e), owner?.color ?? '#888')}"></div>
+      html = `<div class="portrait"><img src="${this.unitIconSrc(e, 96)}"></div>
 <div class="info-main">
   <div class="info-name">${d.name}</div>
   <div class="info-owner" style="color:${owner?.color ?? '#aaa'}">${ownerTxt}${food}</div>
@@ -381,10 +381,16 @@ export class Hud {
     const out: string[] = [];
     b.q.forEach((q, i) => {
       const prog = i === 0 ? `<span class="bar" style="width:${(q.t / q.total) * 100}%"></span>` : '';
-      const img = q.u ? `<img src="${r.icon(`u:${q.u}:idle:${q.u === 'villager' ? 'build|none|m' : ''}`, col, 64)}">` : ICON[TECH_BY_ID[q.tech!].icon] ?? ICON.up;
+      const img = q.u ? `<img src="${r.unitIcon(q.u, col, 64)}">` : ICON[TECH_BY_ID[q.tech!].icon] ?? ICON.up;
       out.push(`<div class="qitem" data-i="${i}" title="Tap to cancel">${img}${prog}</div>`);
     });
     return out.join('');
+  }
+
+  unitIconSrc(u: Unit, size: number) {
+    const g = this.app.game!;
+    const col = g.players[u.o]?.color ?? '#888';
+    return this.app.renderer!.unitIcon(u.t, col, size, u.t === 'villager' ? `${u.fem ? 'f' : 'm'}${u.id % 3}` : '');
   }
 
   unitIconKey(u: Unit) {

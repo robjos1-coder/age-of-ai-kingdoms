@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { getModel } from './models';
+import { applyFogToShader, makeRigDepthMaterial, makeRigMaterial } from './rig';
 
 export type MatKind = 'lit' | 'unlit' | 'add' | 'overlay' | 'ghost';
 
@@ -14,6 +15,8 @@ interface Batch {
   n: number;
   cap: number;
   shadow: boolean;
+  anim?: THREE.InstancedBufferAttribute;
+  show?: THREE.InstancedBufferAttribute;
 }
 
 const _m = new THREE.Matrix4();
@@ -29,16 +32,36 @@ export class Batches {
   mats: Record<MatKind, THREE.Material>;
   map = new Map<string, Batch>();
   shadows = true;
+  fog: FogUniforms | null = null;
+  private rigMats = new Map<string, { mat: THREE.Material; depth: THREE.Material }>();
 
-  constructor(scene: THREE.Scene, mats: Record<MatKind, THREE.Material>) {
+  constructor(scene: THREE.Scene, mats: Record<MatKind, THREE.Material>, fog?: FogUniforms) {
     this.scene = scene;
     this.mats = mats;
+    this.fog = fog ?? null;
   }
 
   private create(key: string, mat: MatKind, cap: number, shadow: boolean): Batch {
     const model = getModel(key);
+    let material = this.mats[mat];
+    let depth: THREE.Material | undefined;
+    let anim: THREE.InstancedBufferAttribute | undefined, show: THREE.InstancedBufferAttribute | undefined;
+    if (model.rig && mat === 'lit') {
+      let rm = this.rigMats.get(key);
+      if (!rm) { rm = { mat: makeRigMaterial(model.rig, this.fog), depth: makeRigDepthMaterial(model.rig) }; this.rigMats.set(key, rm); }
+      material = rm.mat;
+      depth = rm.depth;
+      anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      show = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+      anim.setUsage(THREE.DynamicDrawUsage);
+      show.setUsage(THREE.DynamicDrawUsage);
+      model.base.setAttribute('aAnim', anim);
+      model.base.setAttribute('aShow', show);
+      if (model.team) { model.team.setAttribute('aAnim', anim); model.team.setAttribute('aShow', show); }
+    }
     const mk = (geo: THREE.BufferGeometry) => {
-      const m = new THREE.InstancedMesh(geo, this.mats[mat], cap);
+      const m = new THREE.InstancedMesh(geo, material, cap);
+      if (depth) m.customDepthMaterial = depth;
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3);
       m.instanceColor.setUsage(THREE.DynamicDrawUsage);
@@ -51,7 +74,7 @@ export class Batches {
       this.scene.add(m);
       return m;
     };
-    return { key, mat, base: mk(model.base), team: model.team ? mk(model.team) : null, n: 0, cap, shadow };
+    return { key, mat, base: mk(model.base), team: model.team ? mk(model.team) : null, n: 0, cap, shadow, anim, show };
   }
 
   private get(key: string, mat: MatKind, shadow: boolean): Batch {
@@ -68,6 +91,8 @@ export class Batches {
         nb.team.instanceMatrix.array.set(b.team.instanceMatrix.array);
         nb.team.instanceColor!.array.set(b.team.instanceColor!.array);
       }
+      if (b.anim && nb.anim) nb.anim.array.set(b.anim.array);
+      if (b.show && nb.show) nb.show.array.set(b.show.array);
       nb.n = b.n;
       this.scene.remove(b.base); b.base.dispose();
       if (b.team) { this.scene.remove(b.team); b.team.dispose(); }
@@ -90,6 +115,25 @@ export class Batches {
     _s.set(sx, sy, sz);
     _m.compose(_p, _q, _s);
     this.write(b, _m, team, tint);
+  }
+
+  /** Add an animated (rigged) instance. roll tips the model over sideways (death). */
+  addRig(key: string, x: number, y: number, z: number, yaw: number, scale: number, team: THREE.Color | null, tint: THREE.Color | null,
+    clip: number, t: number, mclip: number, mt: number, show0: number, show1: number, roll = 0, shadow = true) {
+    const b = this.get(key, 'lit', shadow);
+    _p.set(x, y, z);
+    _e.set(roll, yaw, 0, 'YXZ');
+    _q.setFromEuler(_e);
+    _s.set(scale, scale, scale);
+    _m.compose(_p, _q, _s);
+    const i = b.n;
+    this.write(b, _m, team, tint);
+    if (b.anim) {
+      const a = b.anim.array as Float32Array;
+      a[i * 4] = clip; a[i * 4 + 1] = t; a[i * 4 + 2] = mclip; a[i * 4 + 3] = mt;
+      const sh = b.show!.array as Float32Array;
+      sh[i * 2] = show0; sh[i * 2 + 1] = show1;
+    }
   }
 
   addMatrix(key: string, m: THREE.Matrix4, team?: THREE.Color | null, tint?: THREE.Color | null, mat: MatKind = 'lit', shadow = true) {
@@ -121,6 +165,7 @@ export class Batches {
         b.base.instanceMatrix.needsUpdate = true;
         b.base.instanceColor!.needsUpdate = true;
       }
+      if (b.anim && b.n) { b.anim.needsUpdate = true; b.show!.needsUpdate = true; }
       if (b.team) {
         b.team.count = b.n;
         b.team.visible = b.n > 0;
@@ -159,28 +204,6 @@ export interface FogUniforms {
 }
 
 export function applyFog(mat: THREE.Material, u: FogUniforms) {
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.fogMap = u.fogMap;
-    shader.uniforms.fogSize = u.fogSize;
-    shader.uniforms.cloudMap = u.cloudMap;
-    shader.uniforms.cloudT = u.cloudT;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform float fogSize;')
-      .replace('#include <project_vertex>', `#include <project_vertex>
-  vec4 fogWp = vec4( transformed, 1.0 );
-  #ifdef USE_INSTANCING
-    fogWp = instanceMatrix * fogWp;
-  #endif
-  fogWp = modelMatrix * fogWp;
-  vFogUv = fogWp.xz / fogSize;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform sampler2D fogMap;\nuniform sampler2D cloudMap;\nuniform float cloudT;\nuniform float fogSize;')
-      .replace('#include <dithering_fragment>', `#include <dithering_fragment>
-  float fogV = texture2D( fogMap, vFogUv ).r;
-  if (vFogUv.x < 0.0 || vFogUv.y < 0.0 || vFogUv.x > 1.0 || vFogUv.y > 1.0) fogV = 0.0;
-  vec2 cuv = vFogUv * fogSize / 48.0 + vec2(cloudT * 0.006, cloudT * 0.0035);
-  float cl = texture2D( cloudMap, cuv ).r;
-  gl_FragColor.rgb *= fogV * mix(1.0, 0.8, smoothstep(0.45, 0.75, cl));`);
-  };
+  mat.onBeforeCompile = (shader) => applyFogToShader(shader, u);
   mat.needsUpdate = true;
 }

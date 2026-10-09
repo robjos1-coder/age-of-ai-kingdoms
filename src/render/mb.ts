@@ -16,8 +16,12 @@ export interface PieceOpts {
 }
 
 export class MB {
-  private base: { pos: number[]; nor: number[]; col: number[] } = { pos: [], nor: [], col: [] };
-  private team: { pos: number[]; nor: number[]; col: number[] } = { pos: [], nor: [], col: [] };
+  private base: Buf = { pos: [], nor: [], col: [], bone: [], tag: [] };
+  private team: Buf = { pos: [], nor: [], col: [], bone: [], tag: [] };
+  /** Skeleton joint that subsequently added geometry is attached to (0 = static). */
+  bone = 0;
+  /** Optional geometry tag (e.g. which tool / carried item); untagged = 0. */
+  tag = 0;
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
   /** Small deterministic jitter so neighbouring faces have slightly different shades. */
   jitter = 0.04;
@@ -72,6 +76,8 @@ export class MB {
         tgt.pos.push(pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k));
         tgt.nor.push(nor.getX(i + k), nor.getY(i + k), nor.getZ(i + k));
         tgt.col.push(tmpC.r * j, tmpC.g * j, tmpC.b * j);
+        tgt.bone.push(this.bone);
+        tgt.tag.push(this.tag);
       }
     }
     if (g !== geo) g.dispose();
@@ -124,12 +130,14 @@ export class MB {
   }
 
   build(): { base: THREE.BufferGeometry; team: THREE.BufferGeometry | null } {
-    const mk = (d: { pos: number[]; nor: number[]; col: number[] }) => {
+    const mk = (d: Buf) => {
       if (!d.pos.length) return null;
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(d.pos, 3));
       g.setAttribute('normal', new THREE.Float32BufferAttribute(d.nor, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.col, 3));
+      g.setAttribute('aBone', new THREE.Float32BufferAttribute(d.bone, 1));
+      g.setAttribute('aTag', new THREE.Float32BufferAttribute(d.tag, 1));
       g.computeBoundingSphere();
       g.computeBoundingBox();
       return g;
@@ -138,11 +146,15 @@ export class MB {
   }
 }
 
+interface Buf { pos: number[]; nor: number[]; col: number[]; bone: number[]; tag: number[] }
+
 function emptyGeo() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+  g.setAttribute('aBone', new THREE.Float32BufferAttribute([0, 0, 0], 1));
+  g.setAttribute('aTag', new THREE.Float32BufferAttribute([0, 0, 0], 1));
   return g;
 }
 
