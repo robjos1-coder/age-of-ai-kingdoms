@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { getModel } from './models';
 import { applyFogToShader, makeRigDepthMaterial, makeRigMaterial } from './rig';
+import type { ScanAtlas } from './realism';
 
 export type MatKind = 'lit' | 'unlit' | 'add' | 'overlay' | 'ghost';
 
@@ -35,20 +36,20 @@ export class Batches {
   fog: FogUniforms | null = null;
   private rigMats = new Map<string, { mat: THREE.Material; depth: THREE.Material }>();
 
-  constructor(scene: THREE.Scene, mats: Record<MatKind, THREE.Material>, fog?: FogUniforms) {
+  constructor(scene: THREE.Scene, mats: Record<MatKind, THREE.Material>, fog?: FogUniforms, public realistic = false, private scans?: ScanAtlas, private wind?: { value: number }) {
     this.scene = scene;
     this.mats = mats;
     this.fog = fog ?? null;
   }
 
   private create(key: string, mat: MatKind, cap: number, shadow: boolean): Batch {
-    const model = getModel(key);
+    const model = getModel(key, this.realistic && mat === 'lit');
     let material = this.mats[mat];
     let depth: THREE.Material | undefined;
     let anim: THREE.InstancedBufferAttribute | undefined, show: THREE.InstancedBufferAttribute | undefined;
     if (model.rig && mat === 'lit') {
       let rm = this.rigMats.get(key);
-      if (!rm) { rm = { mat: makeRigMaterial(model.rig, this.fog), depth: makeRigDepthMaterial(model.rig) }; this.rigMats.set(key, rm); }
+      if (!rm) { rm = { mat: makeRigMaterial(model.rig, this.fog, this.scans, this.wind), depth: makeRigDepthMaterial(model.rig) }; this.rigMats.set(key, rm); }
       material = rm.mat;
       depth = rm.depth;
       anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
@@ -191,6 +192,8 @@ export class Batches {
       if (b.team) { this.scene.remove(b.team); b.team.dispose(); }
     }
     this.map.clear();
+    for (const materials of this.rigMats.values()) { materials.mat.dispose(); materials.depth.dispose(); }
+    this.rigMats.clear();
   }
 }
 
@@ -201,6 +204,13 @@ export interface FogUniforms {
   fogSize: { value: number };
   cloudMap: { value: THREE.Texture | null };
   cloudT: { value: number };
+  /** Analytic aerial perspective; shared by terrain, water and animated models. */
+  atmosphere?: {
+    hazeColor: { value: THREE.Color };
+    hazeNear: { value: number };
+    hazeRange: { value: number };
+    hazeStrength: { value: number };
+  };
 }
 
 export function applyFog(mat: THREE.Material, u: FogUniforms) {

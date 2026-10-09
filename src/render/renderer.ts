@@ -8,6 +8,7 @@ import { getModel } from './models';
 import { MOUNTED, QUADS, RIGGED, TAG } from './people';
 import { CLIP, QCLIP, makeRigMaterial } from './rig';
 import { Terrain, WATER_Y } from './terrain';
+import { RealismAssets, makeRealismMaterial } from './realism';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -59,9 +60,17 @@ export class Renderer {
   hemi: THREE.HemisphereLight;
   batches: Batches;
   terrain: Terrain;
-  fog: FogUniforms = { fogMap: { value: null }, fogSize: { value: 1 }, cloudMap: { value: makeCloudTexture() }, cloudT: { value: 0 } };
+  fog: FogUniforms = {
+    fogMap: { value: null }, fogSize: { value: 1 }, cloudMap: { value: makeCloudTexture() }, cloudT: { value: 0 },
+    atmosphere: { hazeColor: { value: new THREE.Color('#c8d6d8').convertLinearToSRGB() }, hazeNear: { value: 78 }, hazeRange: { value: 15 }, hazeStrength: { value: 0 } },
+  };
   game: Game;
   quality: Quality = 'high';
+  realism = true;
+  haze = true;
+  private realismAssets: RealismAssets | null = null;
+  private wind = { value: 0 };
+  get ready(): Promise<void> { return this.realismAssets?.ready ?? Promise.resolve(); }
 
   // camera state
   tx = 0;
@@ -87,17 +96,19 @@ export class Renderer {
   private iconCache = new Map<string, string>();
   biome: string;
 
-  constructor(canvas: HTMLCanvasElement, game: Game, view: ViewState, quality: Quality) {
+  constructor(canvas: HTMLCanvasElement, game: Game, view: ViewState, quality: Quality, realism = true, haze = true) {
     this.canvas = canvas;
     this.game = game;
     this.view = view;
     this.quality = quality;
+    this.realism = realism;
+    this.haze = haze;
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.15;
     this.gl.shadowMap.enabled = quality !== 'low';
-    this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.gl.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = SKY;
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
 
@@ -112,8 +123,9 @@ export class Renderer {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    const lit = new THREE.MeshLambertMaterial({ vertexColors: true });
-    applyFog(lit, this.fog);
+    this.realismAssets = realism ? new RealismAssets(this.gl, this.scene, quality) : null;
+    const lit = this.realismAssets ? makeRealismMaterial(this.realismAssets.model, this.fog, this.wind) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    if (!realism) applyFog(lit, this.fog);
     this.mats = {
       lit,
       unlit: new THREE.MeshBasicMaterial({ vertexColors: false, transparent: true, opacity: 0.9, depthWrite: false }),
@@ -121,10 +133,11 @@ export class Renderer {
       overlay: new THREE.MeshBasicMaterial({ depthTest: false, depthWrite: false, transparent: true }),
       ghost: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.5, depthWrite: false }),
     };
-    this.batches = new Batches(this.scene, this.mats, this.fog);
+    this.batches = new Batches(this.scene, this.mats, this.fog, realism, this.realismAssets?.model, this.wind);
     this.batches.setShadows(quality !== 'low');
     this.biome = game.settings.mapType === 'oasis' ? 'palm' : '';
-    this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis');
+    this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis', this.realismAssets?.ground, game.settings.mapType !== 'arabia' && game.settings.mapType !== 'oasis');
+    this.configureLighting();
     for (const p of game.players) this.teamColors[p.id] = new THREE.Color(p.color);
     this.resize();
     this.zoom = Math.max(9, Math.min(22, this.height / 34));
@@ -136,14 +149,75 @@ export class Renderer {
   }
 
   setQuality(q: Quality) {
+    if (q === this.quality) return;
     this.quality = q;
     this.gl.shadowMap.enabled = q !== 'low';
     this.sun.castShadow = q !== 'low';
     this.batches.setShadows(q !== 'low');
-    const sm = q === 'high' ? 2048 : 1024;
+    const sm = this.shadowResolution();
     if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget; }
     this.sun.shadow.mapSize.set(sm, sm);
+    if (this.realism) this.rebuildWorld();
     this.resize();
+  }
+
+  /** Switch art styles immediately, preserving the match, camera, selection and fog. */
+  setRealism(on: boolean) {
+    if (on === this.realism) return;
+    this.realism = on;
+    this.rebuildWorld();
+  }
+
+  setHaze(on: boolean) {
+    this.haze = on;
+    this.updateAtmosphere();
+  }
+
+  private updateAtmosphere() {
+    const atmosphere = this.fog.atmosphere!;
+    atmosphere.hazeNear.value = 80 - this.zoom * 0.12;
+    atmosphere.hazeRange.value = Math.max(5, this.zoom * 0.65);
+    atmosphere.hazeStrength.value = this.realism && this.haze ? 0.32 * Math.pow(this.zoom / 22, 0.35) : 0;
+  }
+
+  private rebuildWorld() {
+    this.batches.dispose();
+    this.terrain.dispose(this.scene);
+    this.mats.lit.dispose();
+    this.realismAssets?.dispose();
+    this.scene.environment = null;
+    this.realismAssets = this.realism ? new RealismAssets(this.gl, this.scene, this.quality) : null;
+    const lit = this.realismAssets ? makeRealismMaterial(this.realismAssets.model, this.fog, this.wind) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    if (!this.realism) applyFog(lit, this.fog);
+    this.mats.lit = lit;
+    this.batches = new Batches(this.scene, this.mats, this.fog, this.realism, this.realismAssets?.model, this.wind);
+    this.batches.setShadows(this.quality !== 'low');
+    this.terrain = new Terrain(this.scene, this.game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.game.settings.mapType !== 'arabia' && this.game.settings.mapType !== 'oasis');
+    this.terrain.updateFog(this.game.explored, this.game.visible);
+    this.configureLighting();
+  }
+
+  private configureLighting() {
+    this.gl.toneMappingExposure = this.realism ? 0.92 : 1.15;
+    this.hemi.intensity = this.realism ? 0.95 : 1.25;
+    this.hemi.color.set(this.realism ? '#d9e5ee' : '#dbeeff');
+    this.hemi.groundColor.set(this.realism ? '#69604e' : '#5a4a32');
+    this.sun.intensity = this.realism ? 2.6 : 2.4;
+    this.sun.color.set(this.realism ? '#fff1dc' : '#fff1d6');
+    const sm = this.shadowResolution();
+    if (this.sun.shadow.map && this.sun.shadow.mapSize.x !== sm) {
+      this.sun.shadow.map.dispose();
+      this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
+    }
+    this.sun.shadow.mapSize.set(sm, sm);
+    this.sun.shadow.normalBias = this.realism ? 0.015 : 0.03;
+    this.sun.shadow.radius = this.realism ? 2 : 1;
+    this.scene.background = this.realism ? new THREE.Color('#bacdd8') : SKY;
+    this.updateAtmosphere();
+  }
+
+  private shadowResolution() {
+    return this.quality === 'high' ? (this.realism && this.zoom < 14 ? 4096 : 2048) : 1024;
   }
 
   resize() {
@@ -164,6 +238,13 @@ export class Renderer {
     this.tx = Math.max(0, Math.min(S, this.tx));
     this.tz = Math.max(0, Math.min(S, this.tz));
     this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom));
+    this.updateAtmosphere();
+    const shadowSize = this.shadowResolution();
+    if (this.sun.shadow.mapSize.x !== shadowSize) {
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null as unknown as THREE.WebGLRenderTarget;
+      this.sun.shadow.mapSize.set(shadowSize, shadowSize);
+    }
     const aspect = this.width / this.height;
     const halfH = this.zoom / 2;
     this.camera.left = -halfH * aspect;
@@ -282,7 +363,7 @@ export class Renderer {
       if (!g.canSee(b)) continue;
       const s = g.bsize(b);
       const [cx, cy] = g.bcenter(b);
-      const m = getModel(this.buildingKey(b));
+      const m = getModel(this.buildingKey(b), this.realism);
       const hgt = b.done ? m.height * 0.5 : 0.1;
       const p = this.toScreen(cx, cy, g.grid.h(cx, cy) + hgt);
       const r = (s * 0.55) * ppu;
@@ -543,6 +624,7 @@ export class Renderer {
     const b = this.bounds;
     const inView = (x: number, y: number) => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
     this.terrain.animate(this.time);
+    this.wind.value = this.time;
     this.fog.cloudT.value = this.time;
     if (this.lastFogT !== g.time) {
       this.lastFogT = g.time;
@@ -557,6 +639,7 @@ export class Renderer {
       if (!inView(d.x, d.y)) continue;
       const i = Math.floor(d.y) * S + Math.floor(d.x);
       if (g.grid.occ[i] || !g.explored[i]) continue;
+      if (this.realism && this.quality === 'low' && i % 3 !== 0) continue;
       B.add(`d:${d.t}:${d.v}`, d.x, g.grid.h(d.x, d.y), d.y, d.rot, d.s, d.s, d.s, null, null, 'lit', false);
     }
 
@@ -567,7 +650,10 @@ export class Renderer {
       const h = g.grid.h(x, y);
       if (n.t === 'tree') {
         if (n.amt < n.max) B.add(`n:stump:${n.v % 6}`, x, h, y, n.v);
-        else B.add(`tree:${n.v % 4}:${this.biome}`, x, h, y, 0, 1, 1, 1, null, null, 'lit', true);
+        else {
+          const lod = this.realism ? (this.quality === 'low' || this.zoom >= 30 ? 2 : this.quality === 'medium' || this.zoom >= 14 ? 1 : 0) : 0;
+          B.add(`tree:${n.v % 4}:${this.biome}:${lod}`, x, h, y, 0, 1, 1, 1, null, null, 'lit', true);
+        }
       } else if (n.t === 'fish') {
         if (!g.isVisible(x, y) && !g.isExplored(x, y)) continue;
         B.add('n:fish:0', x, WATER_Y, y, this.time * 0.6 + n.v, 1, 1, 1, null, null, 'lit', false);
@@ -602,7 +688,7 @@ export class Renderer {
       if (!bl.done) {
         B.add(`found:${s}`, cx, h, cy, 0, 1, 1, 1, team, null, 'lit', false);
         if (bl.prog > 0) {
-          const m = getModel(key);
+          const m = getModel(key, this.realism);
           B.add(key, cx, h, cy, 0, 1, Math.max(0.04, bl.prog), 1, team, tint);
           if (bl.t !== 'farm' && !def.wall) B.add(`scaffold:${s}:${Math.max(0.6, Math.round(m.height * Math.min(1, bl.prog + 0.2) * 2) / 2)}`, cx, h, cy, 0, 1, 1, 1, null, null, 'lit', false);
         }
@@ -619,7 +705,7 @@ export class Renderer {
         const frac = bl.hp / maxHp;
         if (frac < 0.66 && !def.wall && bl.t !== 'farm' && g.isVisible(cx, cy)) {
           const rate = (1 - frac) * 10 * s;
-          if (Math.random() < rate * dt) this.flame(cx, h + getModel(key).height * (0.3 + Math.random() * 0.4), cy, s * 0.5);
+          if (Math.random() < rate * dt) this.flame(cx, h + getModel(key, this.realism).height * (0.3 + Math.random() * 0.4), cy, s * 0.5);
         }
         if (bl.t === 'blacksmith' && Math.random() < dt * 2) this.particles.push({ key: 'fx:puff', mat: 'lit', x: cx - 0.9, y: h + 2.0, z: cy + 0.35, vx: 0.1, vy: 0.5, vz: 0.05, g: -0.1, life: 2.5, max: 2.5, s0: 0.08, s1: 0.3, c0: new THREE.Color('#8a8a8a'), rot: 0, spin: 0 });
         if (bl.t === 'town_center' && Math.random() < dt * 0.6) this.particles.push({ key: 'fx:puff', mat: 'lit', x: cx - 1.2, y: h + 1.8, z: cy - 1.2, vx: 0.1, vy: 0.4, vz: 0.05, g: -0.1, life: 2.5, max: 2.5, s0: 0.06, s1: 0.25, c0: new THREE.Color('#9a9a9a'), rot: 0, spin: 0 });
@@ -629,7 +715,7 @@ export class Renderer {
         if (bl.rally && bl.o === g.human) {
           B.add('fx:flag', bl.rally.x, g.grid.h(bl.rally.x, bl.rally.y), bl.rally.y, 0, 1, 1, 1, team);
         }
-        this.hpBar(cx, h + Math.min(getModel(key).height + 0.3, 4.2), cy, bl.hp / buildingStats(g.players[bl.o], bl.t).hp, s * 0.5, bl.done ? null : bl.prog);
+        this.hpBar(cx, h + Math.min(getModel(key, this.realism).height + 0.3, 4.2), cy, bl.hp / buildingStats(g.players[bl.o], bl.t).hp, s * 0.5, bl.done ? null : bl.prog);
       }
     }
     // rubble
@@ -653,7 +739,8 @@ export class Renderer {
       const team = u.o > 0 ? this.teamColors[u.o] : null;
       const tint = u.flash && u.flash > 0 ? C_FLASH : null;
       let key: string;
-      const sc = (d.naval ? 1 : d.cls.includes('animal') ? 1.05 : 1.1) * this.unitScale;
+      const scale = this.realism ? (u.t === 'sheep' ? 0.86 : d.cls.includes('animal') ? 0.98 : 1) : (d.naval ? 1 : d.cls.includes('animal') ? 1.05 : 1.1);
+      const sc = scale * this.unitScale;
       if (RIGGED.has(u.t)) {
         const an = this.animFor(u, x, y);
         key = an.key;
@@ -664,7 +751,7 @@ export class Renderer {
         if (d.naval) pitch = Math.sin(this.time * 1.3 + u.id) * 0.04;
         B.add(key, x, h, y, -u.a, sc, sc, sc, team, tint, 'lit', u.dead === undefined, 0, pitch);
       }
-      if (u.t === 'sheep' && u.o > 0 && u.dead === undefined) {
+      if (!this.realism && u.t === 'sheep' && u.o > 0 && u.dead === undefined) {
         // tinted collar
         B.add('fx:disc', x, h + 0.02, y, 0, 0.12, 1, 0.12, null, team, 'unlit', false);
       }
@@ -679,7 +766,7 @@ export class Renderer {
       const maxHp = u.o > 0 ? unitStats(g.players[u.o], u.t).hp : d.hp;
       const recent = u.hitT !== undefined && g.time - u.hitT < 3;
       if ((sel.has(u.id) || recent) && !d.cls.includes('animal') || (recent && u.o === 0 && u.t !== 'sheep')) {
-        const top = getModel(key).height * sc;
+        const top = getModel(key, this.realism).height * sc;
         this.hpBar(x, h + top + 0.18, y, u.hp / maxHp, d.radius > 0.4 ? 0.5 : 0.32, null);
       }
     }
@@ -742,6 +829,7 @@ export class Renderer {
     }
 
     B.end();
+    if (this.terrain.realisticWater && this.terrain.waterInView(b.x0, b.y0, b.x1, b.y1)) this.terrain.realisticWater.reflect(this.gl, this.scene, this.camera, this.quality);
     this.gl.render(this.scene, this.camera);
   }
 
@@ -836,8 +924,11 @@ export class Renderer {
     this.gl.setClearColor(0x000000, 0);
     this.gl.clear();
     const sh = this.gl.shadowMap.enabled;
+    const exposure = this.gl.toneMappingExposure;
     this.gl.shadowMap.enabled = false;
+    this.gl.toneMappingExposure = 1.15;
     this.gl.render(scene, cam);
+    this.gl.toneMappingExposure = exposure;
     this.gl.shadowMap.enabled = sh;
     const buf = new Uint8Array(size * size * 4);
     this.gl.readRenderTargetPixels(this.iconRT, 0, 0, size, size, buf);
@@ -862,6 +953,9 @@ export class Renderer {
     this.batches.dispose();
     this.terrain.dispose(this.scene);
     this.iconRT?.dispose();
+    for (const material of Object.values(this.mats)) material.dispose();
+    this.realismAssets?.dispose();
+    this.fog.cloudMap.value?.dispose();
     this.gl.dispose();
   }
 }

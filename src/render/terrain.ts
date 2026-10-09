@@ -3,6 +3,8 @@
 import * as THREE from 'three';
 import { Grid, T_DIRT, T_FOREST, T_GRASS, T_SAND, T_SHALLOW, T_SNOW, T_WATER } from '../sim/grid';
 import { applyFog, type FogUniforms } from './batches';
+import { makeGroundMaterial, type ScanAtlas } from './realism';
+import { RealisticWater } from './realism-water';
 
 const TERRAIN_COLORS: Record<number, [string, string]> = {
   [T_GRASS]: ['#5f9c3e', '#79b04c'],
@@ -27,8 +29,11 @@ export class Terrain {
   decos: Deco[] = [];
   waterNormal: THREE.CanvasTexture;
   private grid: Grid;
+  private detail: THREE.Texture | null = null;
+  private biomeMap: THREE.DataTexture | null = null;
+  realisticWater: RealisticWater | null = null;
 
-  constructor(scene: THREE.Scene, grid: Grid, fog: FogUniforms, desert: boolean) {
+  constructor(scene: THREE.Scene, grid: Grid, fog: FogUniforms, desert: boolean, scans?: ScanAtlas, lush = false) {
     this.grid = grid;
     const S = grid.size;
     // fog texture
@@ -42,7 +47,8 @@ export class Terrain {
     fog.fogSize.value = S;
 
     // ---- terrain geometry
-    const W = S + 1;
+    const subdivision = scans ? 2 : 1;
+    const W = S * subdivision + 1;
     const pos = new Float32Array(W * W * 3);
     const col = new Float32Array(W * W * 3);
     const uv = new Float32Array(W * W * 2);
@@ -60,16 +66,17 @@ export class Terrain {
       tileCol.push(ca.clone().lerp(cb, n * 0.8 + rnd() * 0.2));
     }
     const c = new THREE.Color();
-    for (let y = 0; y <= S; y++) {
-      for (let x = 0; x <= S; x++) {
-        const vi = y * W + x;
-        const h = grid.height[vi];
+    for (let vy = 0; vy < W; vy++) {
+      for (let vx = 0; vx < W; vx++) {
+        const x = vx / subdivision, y = vy / subdivision;
+        const vi = vy * W + vx;
+        const h = grid.h(x, y);
         pos[vi * 3] = x; pos[vi * 3 + 1] = h; pos[vi * 3 + 2] = y;
         uv[vi * 2] = x / 3; uv[vi * 2 + 1] = y / 3;
         c.setRGB(0, 0, 0);
         let n = 0;
         for (let dy = -1; dy <= 0; dy++) for (let dx = -1; dx <= 0; dx++) {
-          const tx = x + dx, ty = y + dy;
+          const tx = Math.floor(x) + dx, ty = Math.floor(y) + dy;
           if (tx < 0 || ty < 0 || tx >= S || ty >= S) continue;
           c.add(tileCol[ty * S + tx]);
           n++;
@@ -83,7 +90,7 @@ export class Terrain {
       }
     }
     const idx: number[] = [];
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    for (let y = 0; y < W - 1; y++) for (let x = 0; x < W - 1; x++) {
       const a = y * W + x, b = a + 1, d = a + W, e = d + 1;
       if ((x + y) % 2) idx.push(a, d, b, b, d, e);
       else idx.push(a, d, e, a, e, b);
@@ -94,9 +101,23 @@ export class Terrain {
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    const detail = makeDetailTexture();
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detail });
-    applyFog(mat, fog);
+    let mat: THREE.Material;
+    if (scans) {
+      const mask = new Uint8Array(S * S * 4);
+      for (let i = 0; i < S * S; i++) {
+        const t = desert && grid.terrain[i] === T_GRASS ? T_SAND : grid.terrain[i];
+        const channel = t === T_DIRT ? 1 : t === T_FOREST ? 3 : [T_SAND, T_SHALLOW, T_WATER].includes(t) ? 2 : t === T_SNOW ? -1 : 0;
+        if (channel >= 0) mask[i * 4 + channel] = 255;
+      }
+      this.biomeMap = new THREE.DataTexture(mask, S, S);
+      this.biomeMap.magFilter = this.biomeMap.minFilter = THREE.LinearFilter;
+      this.biomeMap.needsUpdate = true;
+      mat = makeGroundMaterial(scans, this.biomeMap, fog, S, lush);
+    } else {
+      this.detail = makeDetailTexture();
+      mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: this.detail });
+      applyFog(mat, fog);
+    }
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     scene.add(this.mesh);
@@ -113,7 +134,11 @@ export class Terrain {
       normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.6, 0.6), depthWrite: false,
     });
     applyFog(wmat, fog);
-    this.water = new THREE.Mesh(wgeo, wmat);
+    if (scans) {
+      wgeo.dispose(); wmat.dispose();
+      this.realisticWater = new RealisticWater(grid, this.waterNormal, fog);
+      this.water = this.realisticWater.mesh;
+    } else this.water = new THREE.Mesh(wgeo, wmat);
     this.water.renderOrder = 1;
     this.water.receiveShadow = true;
     scene.add(this.water);
@@ -137,8 +162,12 @@ export class Terrain {
       else if (t === T_SAND) d = r < 0.02 ? 'rock' : desert && r < 0.03 ? 'cactus' : null;
       else if (t === T_DIRT) d = r < 0.04 ? 'rock' : r < 0.07 ? 'grass' : null;
       else if (t === T_SHALLOW) d = r < 0.15 ? 'reed' : null;
+      if (scans && !desert && !d && (t === T_GRASS || t === T_FOREST) && r < 0.43) d = 'grass';
       if (!d) continue;
       this.decos.push({ t: d, x: x + 0.2 + rnd() * 0.6, y: y + 0.2 + rnd() * 0.6, v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.8 + rnd() * 0.5 });
+      if (scans && !desert && (t === T_GRASS || t === T_FOREST) && r < 0.65) {
+        this.decos.push({ t: 'grass', x: x + rnd(), y: y + rnd(), v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.65 + rnd() * 0.6 });
+      }
     }
   }
 
@@ -155,16 +184,32 @@ export class Terrain {
 
   animate(t: number) {
     this.waterNormal.offset.set(t * 0.012, t * 0.007);
+    this.realisticWater?.animate(t);
+  }
+
+  waterInView(x0: number, z0: number, x1: number, z1: number) {
+    const s = this.grid.size;
+    for (let z = Math.max(0, Math.floor(z0)); z < Math.min(s, Math.ceil(z1)); z++) {
+      for (let x = Math.max(0, Math.floor(x0)); x < Math.min(s, Math.ceil(x1)); x++) {
+        const tile = this.grid.terrain[z * s + x];
+        if (tile === T_WATER || tile === T_SHALLOW) return true;
+      }
+    }
+    return false;
   }
 
   dispose(scene: THREE.Scene) {
     for (const m of [this.mesh, this.water, this.under]) {
       scene.remove(m);
+      if (m === this.water && this.realisticWater) continue;
       m.geometry.dispose();
       (m.material as THREE.Material).dispose();
     }
     this.fogTex.dispose();
     this.waterNormal.dispose();
+    this.realisticWater?.dispose();
+    this.biomeMap?.dispose();
+    this.detail?.dispose();
   }
 }
 

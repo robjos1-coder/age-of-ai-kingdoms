@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import type { FogUniforms } from './batches';
+import { applyModelScans, type ScanAtlas } from './realism';
 
 export const BN = {
   ROOT: 0, PELVIS: 1, TORSO: 2, HEAD: 3,
@@ -294,14 +295,17 @@ function inject(shader: THREE.WebGLProgramParametersWithUniforms, u: RigUniforms
 }
 
 /** Lit material for a rigged model (fog-of-war + clouds + skeleton). */
-export function makeRigMaterial(r: Rig, fog: FogUniforms | null): THREE.MeshLambertMaterial {
+export function makeRigMaterial(r: Rig, fog: FogUniforms | null, scans?: ScanAtlas, wind?: { value: number }): THREE.MeshLambertMaterial | THREE.MeshStandardMaterial {
   const u = rigUniforms(r);
-  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const m = scans
+    ? new THREE.MeshStandardMaterial({ vertexColors: true, map: scans.color, normalMap: scans.normal, roughness: 0.95, normalScale: new THREE.Vector2(0.65, 0.65) })
+    : new THREE.MeshLambertMaterial({ vertexColors: true });
   m.onBeforeCompile = (shader) => {
     inject(shader, u, false);
+    if (scans) applyModelScans(shader, scans, wind);
     if (fog) applyFogToShader(shader, fog);
   };
-  m.customProgramCacheKey = () => (fog ? 'rig-fog' : 'rig');
+  m.customProgramCacheKey = () => `${scans ? 'realism-' : ''}${fog ? 'rig-fog' : 'rig'}`;
   return m;
 }
 
@@ -315,6 +319,18 @@ export function makeRigDepthMaterial(r: Rig): THREE.MeshDepthMaterial {
 
 /** Same fog / cloud injection used by the other lit materials (kept in sync with batches.applyFog). */
 export function applyFogToShader(shader: THREE.WebGLProgramParametersWithUniforms, u: FogUniforms) {
+  if (u.atmosphere) {
+    Object.assign(shader.uniforms, u.atmosphere);
+    // Evaluated per vertex and interpolated: no extra textures or rendering pass.
+    shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>
+      varying float vHaze;
+      uniform float hazeNear;
+      uniform float hazeRange;
+      uniform float hazeStrength;`);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', `#include <common>
+      varying float vHaze;
+      uniform vec3 hazeColor;`);
+  }
   shader.uniforms.fogMap = u.fogMap;
   shader.uniforms.fogSize = u.fogSize;
   shader.uniforms.cloudMap = u.cloudMap;
@@ -327,10 +343,14 @@ export function applyFogToShader(shader: THREE.WebGLProgramParametersWithUniform
     fogWp = instanceMatrix * fogWp;
   #endif
   fogWp = modelMatrix * fogWp;
-  vFogUv = fogWp.xz / fogSize;`);
+  vFogUv = fogWp.xz / fogSize;
+  ${u.atmosphere ? `float hazeDepth = max(0.0, -(viewMatrix * fogWp).z - hazeNear) / hazeRange;
+  float heightFalloff = exp(-max(0.0, fogWp.y) * 0.08);
+  vHaze = min(0.38, (1.0 - exp(-hazeDepth * hazeDepth * hazeStrength)) * heightFalloff);` : ''}`);
   shader.fragmentShader = shader.fragmentShader
     .replace('#include <common>', '#include <common>\nvarying vec2 vFogUv;\nuniform sampler2D fogMap;\nuniform sampler2D cloudMap;\nuniform float cloudT;\nuniform float fogSize;')
     .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+  ${u.atmosphere ? 'gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeColor, vHaze);' : ''}
   float fogV = texture2D( fogMap, vFogUv ).r;
   if (vFogUv.x < 0.0 || vFogUv.y < 0.0 || vFogUv.x > 1.0 || vFogUv.y > 1.0) fogV = 0.0;
   vec2 cuv = vFogUv * fogSize / 48.0 + vec2(cloudT * 0.006, cloudT * 0.0035);

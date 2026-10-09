@@ -115,8 +115,8 @@ function head(mb: MB, s: Spec, skin: Col) {
   const y = 0.665;
   mb.ball(0.08, skin, 0, y, 0, {}, 1.1, 1);
   // face
-  mb.box(0.012, 0.02, 0.018, C.eye, 0.073, y + 0.012, 0.03);
-  mb.box(0.012, 0.02, 0.018, C.eye, 0.073, y + 0.012, -0.03);
+  mb.box(mb.realistic ? 0.004 : 0.012, mb.realistic ? 0.008 : 0.02, mb.realistic ? 0.012 : 0.018, C.eye, 0.073, y + 0.012, 0.03);
+  mb.box(mb.realistic ? 0.004 : 0.012, mb.realistic ? 0.008 : 0.02, mb.realistic ? 0.012 : 0.018, C.eye, 0.073, y + 0.012, -0.03);
   mb.box(0.008, 0.008, 0.026, s.hair ?? C.hair, 0.076, y + 0.035, 0.03);
   mb.box(0.008, 0.008, 0.026, s.hair ?? C.hair, 0.076, y + 0.035, -0.03);
   mb.box(0.03, 0.032, 0.022, skin, 0.08, y - 0.005, 0);
@@ -561,8 +561,19 @@ function animal(mb: MB, t: string, piv: Float32Array) {
           m.box(0.03, 0.03, 0.08, '#3a3533', 0.17, 0.36, 0.06, { rx: 0.6 });
           m.box(0.03, 0.03, 0.08, '#3a3533', 0.17, 0.36, -0.06, { rx: -0.6 });
           m.ball(0.06, C.sheep, 0.16, 0.37, 0, {}, 0.8);
+          if (m.realistic) m.cyl(0.048, 0.048, 0.018, 12, C.team, 0.147, 0.302, 0, { team: true, surface: 'cloth', rz: -Math.PI / 2 + 0.3 });
         },
-        body: (m) => { m.ball(0.17, C.sheep, 0, 0.27, 0, {}, 0.75, 1); m.ball(0.1, C.sheep, 0.1, 0.3, 0.06); m.ball(0.1, C.sheep, -0.1, 0.3, -0.05); },
+        body: (m) => {
+          if (!m.realistic) { m.ball(0.17, C.sheep, 0, 0.27, 0, {}, 0.75, 1); m.ball(0.1, C.sheep, 0.1, 0.3, 0.06); m.ball(0.1, C.sheep, -0.1, 0.3, -0.05); return; }
+          m.pushScale(1.3, 1, 1);
+          m.ball(0.135, C.sheep, 0, 0.27, 0, { surface: 'wool' }, 0.8);
+          m.pop();
+          for (let curl = 0; curl < 32; curl++) {
+            const a = curl * 2.399, dx = (curl % 8) / 7 * 0.27 - 0.135;
+            const r = 0.11 * Math.sqrt(Math.max(0.3, 1 - (dx / 0.18) ** 2));
+            m.ball(0.024, C.sheep, dx, 0.28 + Math.sin(a) * r * 0.65, Math.cos(a) * r, { surface: 'wool' }, 0.8);
+          }
+        },
         tail: (m) => m.ball(0.04, C.sheep, -0.19, 0.28, 0),
       };
       quad(mb, q, piv);

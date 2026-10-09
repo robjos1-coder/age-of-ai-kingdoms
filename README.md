@@ -18,7 +18,8 @@ Single player against computer opponents — no install, no server.
 - **Victory**: conquest, wonder (hold 400 s), or all relics (hold 400 s).
 - **Maps**: Arabia, Black Forest, Lakes, Coastal, Highland, Oasis — 4 sizes, up to 6 players, teams, 4 AI difficulties.
 - **Fog of war**, explored terrain, minimap, autosave + 3 save slots, classic cheat codes (`lumberjack`, `robin hood`, `marco`, `aegis`…).
-- Low-poly 3D art generated in code (no image assets), soft shadows, animated units, fire/smoke/dust effects, drifting cloud shadows.
+- Default-on **realistic graphics**, with photographic PBR textures, detailed instanced models, natural HDR daylight, soft shadows, animated foliage, and reflective water. The original art style remains selectable in Settings.
+- Animated units, fire/smoke/dust effects, drifting cloud shadows.
 - Installable as an app (PWA) and works offline after the first load.
 
 ## Controls
@@ -36,6 +37,23 @@ node --import tsx scripts/simtest.ts 30 arabia 42   # headless AI-vs-AI soak tes
 ```
 
 Open `#gallery`, `#gallery=buildings` or `#gallery=misc` on the dev server to browse every model.
+Add `-realism` to preview the new art, for example `#gallery=buildings-realism`, `#gallery=misc-realism`, or `#gallery=people:villager-realism`.
+The building/resource galleries include a model selector for close inspection.
+On the dev server, add `?graphicsStats` to log average frame rate, rendering CPU time and triangle count every four seconds while testing settings.
+
+### Realistic graphics
+
+**Settings → Realistic graphics** is on by default, including for existing preferences that predate this option. It switches immediately during a match and is saved locally. The game simulation, collision sizes, save format and GUI artwork are unchanged.
+
+The realistic world uses local 1K photographic scans packed into padded texture atlases: color, OpenGL normals and ambient occlusion/roughness/metalness. Ground surfaces blend grass, mud, sand, forest litter, snow and rock; greener maps use a separate lush grass scan. Material textures cover timber, masonry, plaster, roofs, bark, metal, linen, leather and wool. Higher polygon geometry adds leaf canopies and branches, rounded people and animals, sheep fleece, framed windows, roof courses, coopered barrels, paving, ship rigging and curved sails. Sheep render about 18% smaller than in classic mode without changing their gameplay size.
+
+Water uses two animated normal layers, depth-dependent color/transparency, shoreline foam, HDR reflections and periodically refreshed planar reflections of the world. Fog of war applies to terrain, models and reflections.
+
+AoE4 screenshots informed the softer daylight, greener coastal terrain and atmospheric depth at the wide RTS camera angle. **Settings → Atmospheric haze** is also on by default. Haze is calculated per vertex in the existing world shaders, blended before fog of war, and scales with camera zoom. It adds no render pass, framebuffer or texture sampling. Turning it off applies immediately without rebuilding the world.
+
+Quality controls pixel density, shadows, texture resolution and reflection resolution/update rate. Trees use fewer, larger leaf groups at wider zooms and on lower quality settings, preserving canopy coverage. High uses full atlases and 4096px shadows close up, dropping to 2048px at wider views; Medium halves atlas dimensions and uses smaller reflections; Low uses quarter-size atlases, reduced ground vegetation and environment reflections without a planar reflection pass or shadows. The first realistic load downloads roughly 25 MB of local textures and lighting, then the PWA caches them for offline use.
+
+Run `npm run check:graphics` to validate both model libraries. To regenerate the bundled scans, install Pillow and run `python scripts/import-realism-assets.py`. The importer caches downloads in ignored `.asset-cache/`; it is not used by the running game. Exact sources and original download URLs are recorded in `public/realism/sources.json`.
 
 ## Deployment
 
@@ -46,6 +64,7 @@ Pushing to `main` builds and publishes to GitHub Pages via `.github/workflows/de
 
 - Inspired by and forked in spirit from [alexvilelabah/age-of-ai](https://github.com/alexvilelabah/age-of-ai) (MIT). The music tracks in `public/music/` come from that project.
 - Built with [Three.js](https://threejs.org) and [Vite](https://vitejs.dev).
+- Photographic surface scans and daylight environment from [Poly Haven](https://polyhaven.com), licensed [CC0](https://polyhaven.com/license). Asset import powered by the [Poly Haven API](https://polyhaven.com/our-api). See [the source manifest](public/realism/sources.json) and [asset credits](public/realism/CREDITS.md).
 - Age of Empires is a trademark of Microsoft; this is an unaffiliated fan project with original code and art.
 
 ## License

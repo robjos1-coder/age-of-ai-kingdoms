@@ -37,6 +37,8 @@ export type Mode =
 
 export interface Prefs {
   quality: Quality;
+  realism: boolean;
+  haze: boolean;
   sfx: number;
   music: number;
   muted: boolean;
@@ -74,11 +76,16 @@ export class App {
   private running = false;
   private overShown = false;
   private battleT = 0;
+  private startToken = 0;
+  private graphicsStats = import.meta.env.DEV && new URLSearchParams(location.search).has('graphicsStats');
+  private measuredFrames = 0;
+  private measuredRenderMs = 0;
+  private measuredSince = 0;
   idleCycle = 0;
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
-    this.prefs = { quality: defaultQuality(), sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
+    this.prefs = { quality: defaultQuality(), realism: true, haze: true, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
     try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
     this.hud = new Hud(this);
     this.input = new Input(this);
@@ -100,14 +107,18 @@ export class App {
 
   start(settings: Settings, save?: SaveData) {
     this.stop();
+    const token = ++this.startToken;
     const loading = document.getElementById('loading')!;
     loading.classList.remove('hidden');
     // yield a frame so the loading screen shows
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
+        if (token !== this.startToken) return;
         this.game = new Game(settings, save);
         this.view = { selection: new Set(), hover: 0, ghost: null, markers: [], flashIds: new Map() };
-        this.renderer = new Renderer(this.canvas, this.game, this.view, this.prefs.quality);
+        this.renderer = new Renderer(this.canvas, this.game, this.view, this.prefs.quality, this.prefs.realism, this.prefs.haze);
+        await this.renderer.ready;
+        if (token !== this.startToken) return;
         this.mode = { k: 'normal' };
         this.menuPath = 'root';
         this.groups.clear();
@@ -118,22 +129,27 @@ export class App {
         this.menus.hideAll();
         this.running = true;
         this.lastT = performance.now();
+        this.measuredSince = 0; this.measuredFrames = 0; this.measuredRenderMs = 0;
         music.play('game');
         // pre-warm icons
         this.hud.prewarm();
         this.startLoop();
         if (!save) this.hud.toast(`You are the ${CIVS[this.game.players[this.game.human].civ].name}. Build your economy and conquer your enemies!`, 'gold', 6000);
       } catch (e) {
+        if (token !== this.startToken) return;
         console.error(e);
+        this.stop();
         alert('Failed to start the game: ' + (e as Error).message);
         this.menus.showMain();
       } finally {
-        loading.classList.add('hidden');
+        if (token === this.startToken) loading.classList.add('hidden');
       }
     }, 30);
   }
 
   stop() {
+    this.startToken++;
+    document.getElementById('loading')?.classList.add('hidden');
     this.running = false;
     this.loopToken++;
     this.renderer?.dispose();
@@ -185,7 +201,24 @@ export class App {
     this.ambientSounds(dt);
     this.cleanSelection();
     this.updateGhost();
+    const renderStart = this.graphicsStats ? performance.now() : 0;
     this.renderer.render(this.paused ? 1 : Math.min(1, this.acc / TICK), dt);
+    if (this.graphicsStats && !document.hidden) {
+      if (!this.measuredSince) this.measuredSince = now;
+      this.measuredRenderMs += performance.now() - renderStart;
+      this.measuredFrames++;
+      if (now - this.measuredSince >= 4000) {
+        console.info('Graphics stats', JSON.stringify({
+          fps: +(this.measuredFrames * 1000 / (now - this.measuredSince)).toFixed(1),
+          renderCpuMs: +(this.measuredRenderMs / this.measuredFrames).toFixed(2),
+          quality: this.renderer.quality, realism: this.renderer.realism, haze: this.renderer.haze,
+          zoom: +this.renderer.zoom.toFixed(1), triangles: this.renderer.gl.info.render.triangles,
+        }));
+        this.measuredSince = now; this.measuredFrames = 0; this.measuredRenderMs = 0;
+      }
+    } else if (this.graphicsStats) {
+      this.measuredSince = 0; this.measuredFrames = 0; this.measuredRenderMs = 0;
+    }
     this.hud.update(dt);
     if (g.over && !this.overShown) {
       this.overShown = true;

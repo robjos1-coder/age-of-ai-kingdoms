@@ -263,6 +263,8 @@ export class Menus {
       <h2>Settings</h2>
       <div class="grid2">
         <label class="f">Graphics quality<select id="o-q"><option value="low">Low (fast, no shadows)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+        <label class="f"><span><input type="checkbox" id="o-realism"> Realistic graphics</span><small class="sub">Detailed models, photographic textures, natural lighting and reflective water.</small></label>
+        <label class="f"><span><input type="checkbox" id="o-haze"> Atmospheric haze</span><small class="sub">Soft distance haze in realistic graphics.</small></label>
         <label class="f">Game speed<select id="o-speed"><option value="1">Slow (1.0×)</option><option value="1.5">Normal (1.5×)</option><option value="1.7">AoE2 Normal (1.7×)</option><option value="2">Fast (2.0×)</option><option value="3">Very fast (3.0×)</option></select></label>
         <label class="f">Sound effects<input type="range" id="o-sfx" min="0" max="1" step="0.05"></label>
         <label class="f">Music<input type="range" id="o-music" min="0" max="1" step="0.05"></label>
@@ -275,6 +277,8 @@ export class Menus {
       <div class="row" style="margin-top:16px"><button class="btn primary" id="o-back">Done</button><button class="btn small" id="o-fs">Toggle fullscreen</button></div>`, !!this.app.game);
     const q = <T extends HTMLElement>(sel: string) => this.root.querySelector(sel) as T;
     q<HTMLSelectElement>('#o-q').value = pr.quality;
+    q<HTMLInputElement>('#o-realism').checked = pr.realism;
+    q<HTMLInputElement>('#o-haze').checked = pr.haze;
     q<HTMLSelectElement>('#o-speed').value = String(pr.speed);
     q<HTMLInputElement>('#o-sfx').value = String(pr.sfx);
     q<HTMLInputElement>('#o-music').value = String(pr.music);
@@ -285,6 +289,8 @@ export class Menus {
     q<HTMLInputElement>('#o-edge').checked = pr.edgeScroll;
     const apply = () => {
       pr.quality = q<HTMLSelectElement>('#o-q').value as typeof pr.quality;
+      pr.realism = q<HTMLInputElement>('#o-realism').checked;
+      pr.haze = q<HTMLInputElement>('#o-haze').checked;
       pr.speed = +q<HTMLSelectElement>('#o-speed').value;
       pr.sfx = +q<HTMLInputElement>('#o-sfx').value;
       pr.music = +q<HTMLInputElement>('#o-music').value;
@@ -296,6 +302,8 @@ export class Menus {
       Object.assign(audioSettings, { sfx: pr.sfx, music: pr.music, muted: pr.muted });
       applyAudioSettings();
       this.app.renderer?.setQuality(pr.quality);
+      this.app.renderer?.setRealism(pr.realism);
+      this.app.renderer?.setHaze(pr.haze);
       this.app.savePrefs();
       this.app.hud.reset();
     };

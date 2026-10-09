@@ -2,6 +2,9 @@
 // Pieces flagged `team` go into a separate geometry tinted by player colour at render time.
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { SURFACE, SURFACE_SCALE, surfaceFor, type Surface } from './surfaces';
+import { gableDetails, pyramidDetails } from './realism-models';
 
 const tmpM = new THREE.Matrix4();
 const tmpC = new THREE.Color();
@@ -13,11 +16,16 @@ export interface PieceOpts {
   rx?: number;
   ry?: number;
   rz?: number;
+  surface?: Surface;
 }
 
 export class MB {
-  private base: Buf = { pos: [], nor: [], col: [], bone: [], tag: [] };
-  private team: Buf = { pos: [], nor: [], col: [], bone: [], tag: [] };
+  private base: Buf = { pos: [], nor: [], col: [], bone: [], tag: [], uv: [], surface: [] };
+  private team: Buf = { pos: [], nor: [], col: [], bone: [], tag: [], uv: [], surface: [] };
+  surfaces = new Map<Col, Surface>();
+  constructor(public realistic = false, public context = 'unit') {
+    if (realistic) this.jitter = 0.012;
+  }
   /** Skeleton joint that subsequently added geometry is attached to (0 = static). */
   bone = 0;
   /** Optional geometry tag (e.g. which tool / carried item); untagged = 0. */
@@ -64,11 +72,17 @@ export class MB {
       new THREE.Vector3(sx, sy, sz),
     );
     g.applyMatrix4(this.m.clone().multiply(tmpM));
-    g.computeVertexNormals();
+    if (!this.realistic || !g.getAttribute('normal')) g.computeVertexNormals();
     const pos = g.getAttribute('position');
     const nor = g.getAttribute('normal');
     const tgt = o.team ? this.team : this.base;
     tmpC.set(color as THREE.ColorRepresentation);
+    const surface = o.surface ?? (o.team ? 'cloth' : this.surfaces.get(color) ?? surfaceFor(color, this.context));
+    const slot = SURFACE[surface];
+    if (this.realistic && !['leaf', 'skin', 'cloth', 'leather', 'wool'].includes(surface)) {
+      tmpC.lerp(WHITE, surface === 'slate' ? 0.32 : surface === 'tile' ? 0.6 : surface === 'thatch' ? 0.65 : 0.8);
+    }
+    const density = SURFACE_SCALE[slot];
     const n = pos.count;
     for (let i = 0; i < n; i += 3) {
       const j = 1 + (this.rand() - 0.5) * this.jitter * 2;
@@ -78,6 +92,14 @@ export class MB {
         tgt.col.push(tmpC.r * j, tmpC.g * j, tmpC.b * j);
         tgt.bone.push(this.bone);
         tgt.tag.push(this.tag);
+        tgt.surface.push(slot);
+        // Piece-space projection keeps grain attached to moving limbs and tools.
+        // Select one plane per triangle to avoid UV discontinuities on rounded surfaces.
+        const nx = Math.abs(nor.getX(i)), ny = Math.abs(nor.getY(i)), nz = Math.abs(nor.getZ(i));
+        const p = i + k;
+        const u = nx > ny && nx > nz ? pos.getZ(p) : pos.getX(p);
+        const v = ny > nx && ny > nz ? pos.getZ(p) : pos.getY(p);
+        tgt.uv.push(u * density, v * density);
       }
     }
     if (g !== geo) g.dispose();
@@ -86,42 +108,47 @@ export class MB {
   }
 
   box(w: number, h: number, d: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
+    if (this.realistic && this.context === 'unit' && Math.min(w, h, d) > 0.015) return this.add(roundedBox(w, h, d), color, x, y, z, o);
     return this.add(BOX, color, x, y, z, o, w, h, d);
   }
 
   /** Box whose bottom sits at y. */
   boxB(w: number, h: number, d: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(BOX, color, x, y + h / 2, z, o, w, h, d);
+    return this.box(w, h, d, color, x, y + h / 2, z, o);
   }
 
   cyl(rTop: number, rBot: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(cylGeo(rTop, rBot, seg), color, x, y, z, o, 1, h, 1);
+    return this.add(cylGeo(rTop, rBot, this.realistic ? Math.max(16, seg * 2) : seg), color, x, y, z, o, 1, h, 1);
   }
 
   cylB(rTop: number, rBot: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(cylGeo(rTop, rBot, seg), color, x, y + h / 2, z, o, 1, h, 1);
+    return this.cyl(rTop, rBot, h, seg, color, x, y + h / 2, z, o);
   }
 
   cone(r: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(cylGeo(0, r, seg), color, x, y, z, o, 1, h, 1);
+    return this.cyl(0, r, h, seg, color, x, y, z, o);
   }
 
   coneB(r: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(cylGeo(0, r, seg), color, x, y + h / 2, z, o, 1, h, 1);
+    return this.cone(r, h, seg, color, x, y + h / 2, z, o);
   }
 
   ball(r: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}, sy = 1, detail = 0) {
-    return this.add(detail ? ICO1 : ICO0, color, x, y, z, o, r, r * sy, r);
+    return this.add(this.realistic ? SPHERE : detail ? ICO1 : ICO0, color, x, y, z, o, r, r * sy, r);
   }
 
   /** Square pyramid roof, bottom at y. */
   pyramid(w: number, d: number, h: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(PYR, color, x, y + h / 2, z, o, w, h, d);
+    this.add(PYR, color, x, y + h / 2, z, o, w, h, d);
+    if (this.realistic && this.context === 'building') pyramidDetails(this, w, d, h, color, x, y, z, o);
+    return this;
   }
 
   /** Gable roof (triangular prism) with ridge along X, bottom at y. */
   gable(w: number, d: number, h: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(PRISM, color, x, y, z, o, w, h, d);
+    this.add(PRISM, color, x, y, z, o, w, h, d);
+    if (this.realistic && this.context === 'building') gableDetails(this, w, d, h, color, x, y, z, o);
+    return this;
   }
 
   /** Thin plane-ish slab (for flags, sails). */
@@ -138,6 +165,8 @@ export class MB {
       g.setAttribute('color', new THREE.Float32BufferAttribute(d.col, 3));
       g.setAttribute('aBone', new THREE.Float32BufferAttribute(d.bone, 1));
       g.setAttribute('aTag', new THREE.Float32BufferAttribute(d.tag, 1));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(d.uv, 2));
+      g.setAttribute('aSurface', new THREE.Float32BufferAttribute(d.surface, 1));
       g.computeBoundingSphere();
       g.computeBoundingBox();
       return g;
@@ -146,7 +175,7 @@ export class MB {
   }
 }
 
-interface Buf { pos: number[]; nor: number[]; col: number[]; bone: number[]; tag: number[] }
+interface Buf { pos: number[]; nor: number[]; col: number[]; bone: number[]; tag: number[]; uv: number[]; surface: number[] }
 
 function emptyGeo() {
   const g = new THREE.BufferGeometry();
@@ -155,10 +184,24 @@ function emptyGeo() {
   g.setAttribute('color', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
   g.setAttribute('aBone', new THREE.Float32BufferAttribute([0, 0, 0], 1));
   g.setAttribute('aTag', new THREE.Float32BufferAttribute([0, 0, 0], 1));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 2));
+  g.setAttribute('aSurface', new THREE.Float32BufferAttribute([0, 0, 0], 1));
   return g;
 }
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
+const WHITE = new THREE.Color(1, 1, 1);
+const SPHERE = new THREE.SphereGeometry(1, 16, 10);
+const roundCache = new Map<string, THREE.BufferGeometry>();
+function roundedBox(w: number, h: number, d: number) {
+  const key = `${w}|${h}|${d}`;
+  let geometry = roundCache.get(key);
+  if (!geometry) {
+    geometry = new RoundedBoxGeometry(w, h, d, 1, Math.min(0.025, Math.min(w, h, d) * 0.22));
+    roundCache.set(key, geometry);
+  }
+  return geometry;
+}
 const ICO0 = new THREE.IcosahedronGeometry(1, 0);
 const ICO1 = new THREE.IcosahedronGeometry(1, 1);
 const PYR = (() => {

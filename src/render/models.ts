@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { MB, type Col } from './mb';
 import { buildRigged } from './people';
 import type { Rig } from './rig';
+import { realisticTree, realisticDeco, detailBuilding, detailShip, detailSiege } from './realism-models';
 
 export interface ModelGeo {
   base: THREE.BufferGeometry;
@@ -15,10 +16,12 @@ export interface ModelGeo {
 
 const cache = new Map<string, ModelGeo>();
 
-export function getModel(key: string): ModelGeo {
-  let m = cache.get(key);
+export function getModel(key: string, realistic = false): ModelGeo {
+  const cacheKey = `${realistic ? 'real:' : 'classic:'}${key}`;
+  let m = cache.get(cacheKey);
   if (m) return m;
-  const mb = new MB();
+  const context = key.startsWith('b:') ? 'building' : /^(tree:|n:|d:)/.test(key) ? 'natural' : key.startsWith('fx:') ? 'effect' : 'unit';
+  const mb = new MB(realistic, context);
   let rig: Rig | undefined;
   if (key.startsWith('r:')) {
     const [, t, v] = key.split(':');
@@ -35,7 +38,7 @@ export function getModel(key: string): ModelGeo {
     for (let i = 0; i < pos.count; i++) if (tag.getX(i) === 0) h = Math.max(h, pos.getY(i));
   }
   m = { base: g.base, team: g.team, height: h, rig };
-  cache.set(key, m);
+  cache.set(cacheKey, m);
   return m;
 }
 
@@ -133,9 +136,10 @@ function siege(mb: MB, t: string, pose: string, variant: string) {
       break;
     }
   }
+  if (mb.realistic) detailSiege(mb, t, variant);
 }
 
-function hullGeo(L: number, W: number, h: number, taper: number): THREE.BufferGeometry {
+function hullGeo(L: number, W: number, h: number, taper: number, segments = 4): THREE.BufferGeometry {
   const sh = new THREE.Shape();
   const w = (W / 2) * taper;
   sh.moveTo(-L / 2, -w * 0.8);
@@ -144,7 +148,7 @@ function hullGeo(L: number, W: number, h: number, taper: number): THREE.BufferGe
   sh.quadraticCurveTo(L * 0.4, w * 0.85, L / 2, 0);
   sh.quadraticCurveTo(L * 0.4, -w * 0.85, L * 0.12, -w);
   sh.lineTo(-L / 2, -w * 0.8);
-  const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 4 });
+  const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: segments });
   g.rotateX(-Math.PI / 2);
   return g;
 }
@@ -154,17 +158,29 @@ function ship(mb: MB, t: string, pose: string) {
   const W = t === 'transport_ship' ? 0.62 : t === 'fishing_ship' ? 0.42 : 0.5;
   const hullC = t === 'galleon' || t === 'cannon_galleon' ? '#5a3a22' : C.wood;
   // hull: narrow keel, wider upper hull, deck, rails
-  mb.add(hullGeo(L * 0.9, W, 0.14, 0.62), C.dwood, 0, -0.06, 0);
-  mb.add(hullGeo(L, W, 0.2, 1), hullC, 0, 0.06, 0);
-  mb.add(hullGeo(L * 0.92, W, 0.02, 0.86), C.plank, 0, 0.255, 0);
-  mb.add(hullGeo(L * 1.01, W, 0.05, 1.02), C.team, 0, 0.09, 0, { team: true });
+  mb.add(hullGeo(L * 0.9, W, 0.14, 0.62, mb.realistic ? 16 : 4), C.dwood, 0, -0.06, 0);
+  mb.add(hullGeo(L, W, 0.2, 1, mb.realistic ? 16 : 4), hullC, 0, 0.06, 0);
+  mb.add(hullGeo(L * 0.92, W, 0.02, 0.86, mb.realistic ? 16 : 4), C.plank, 0, 0.255, 0);
+  mb.add(hullGeo(L * 1.01, W, 0.05, 1.02, mb.realistic ? 16 : 4), C.team, 0, 0.09, 0, { team: true });
   mb.box(0.04, 0.05, W * 0.78, C.dwood, -L * 0.48, 0.3, 0);
   mb.box(L * 0.2, 0.18, W * 0.72, C.plank, -L * 0.34, 0.36, 0);
   mb.box(L * 0.22, 0.03, W * 0.78, C.dwood, -L * 0.34, 0.46, 0);
   mb.box(0.2, 0.025, 0.025, C.dwood, L * 0.55, 0.3, 0, { rz: 0.35 });
   const sail = (x: number, h: number, w: number) => {
     mb.cyl(0.025, 0.03, h, 5, C.dwood, x, 0.25 + h / 2, 0);
-    mb.box(0.03, h * 0.6, w, C.team, x + 0.03, 0.25 + h * 0.55, 0, { team: true });
+    if (mb.realistic) {
+      const cloth = new THREE.PlaneGeometry(w, h * 0.6, 8, 6);
+      cloth.rotateY(Math.PI / 2);
+      const positions = cloth.getAttribute('position');
+      for (let i = 0; i < positions.count; i++) positions.setX(i, 0.1 * Math.sin((positions.getZ(i) / w + 0.5) * Math.PI) * Math.cos(positions.getY(i) / h * 2));
+      cloth.computeVertexNormals();
+      mb.add(cloth, '#d8cfb9', x + 0.03, 0.25 + h * 0.55, 0, { surface: 'cloth' });
+      cloth.scale(-1, 1, -1);
+      mb.add(cloth, '#d8cfb9', x + 0.035, 0.25 + h * 0.55, 0, { surface: 'cloth' });
+      cloth.dispose();
+      mb.box(0.012, h * 0.35, w * 0.12, C.team, x + 0.135, 0.25 + h * 0.55, 0, { team: true });
+      mb.box(0.012, h * 0.05, w * 0.36, C.team, x + 0.136, 0.25 + h * 0.58, 0, { team: true });
+    } else mb.box(0.03, h * 0.6, w, C.team, x + 0.03, 0.25 + h * 0.55, 0, { team: true });
     mb.box(0.04, 0.03, w + 0.06, C.dwood, x + 0.03, 0.25 + h * 0.86, 0);
   };
   switch (t) {
@@ -190,6 +206,7 @@ function ship(mb: MB, t: string, pose: string) {
       if (t === 'cannon_galleon') for (let i = 0; i < 3; i++) for (const s of [-1, 1]) mb.cyl(0.03, 0.035, 0.14, 6, C.black, -0.2 + i * 0.25, 0.2, (W / 2 + 0.04) * s, { rx: Math.PI / 2 });
       break;
   }
+  if (mb.realistic) detailShip(mb, L, W);
 }
 
 function buildUnit(mb: MB, t: string, pose: string, variant: string) {
@@ -221,9 +238,19 @@ function windows(mb: MB, w: number, d: number, y: number, st: Style, n = 2, side
   for (let i = 0; i < n; i++) {
     const z = (i - (n - 1) / 2) * (d / (n + 0.5));
     mb.box(0.03, 0.14, 0.1, st.win, w / 2 + 0.005, y, z);
+    if (mb.realistic) {
+      // Lintels, projecting sills, mullions and open wooden shutters.
+      for (const dy of [-0.085, 0.085]) mb.box(0.065, 0.024, 0.15, st.trim, w / 2 + 0.015, y + dy, z, { surface: 'wood' });
+      mb.box(0.042, 0.145, 0.009, st.trim, w / 2 + 0.023, y, z, { surface: 'wood' });
+      for (const s of [-1, 1]) mb.box(0.028, 0.14, 0.062, st.wall2, w / 2 + 0.036, y, z + s * 0.11, { ry: s * 0.22, surface: 'wood' });
+    }
     if (side) {
       const x = (i - (n - 1) / 2) * (w / (n + 0.5));
       mb.box(0.1, 0.14, 0.03, st.win, x, y, d / 2 + 0.005);
+      if (mb.realistic) {
+        for (const dy of [-0.085, 0.085]) mb.box(0.15, 0.024, 0.065, st.trim, x, y + dy, d / 2 + 0.015, { surface: 'wood' });
+        mb.box(0.009, 0.145, 0.042, st.trim, x, y, d / 2 + 0.023, { surface: 'wood' });
+      }
     }
   }
 }
@@ -248,6 +275,16 @@ function house(mb: MB, w: number, d: number, h: number, st: Style, tier: number,
   mb.gable(w + 0.18, d + 0.18, roofH, st.roof, 0, h, 0);
   mb.box(w + 0.2, 0.04, 0.06, st.roof2, 0, h + roofH - 0.01, 0);
   mb.box(0.03, 0.26, 0.16, st.win, w / 2 + 0.005, 0.13, 0);
+  if (mb.realistic) {
+    for (const side of [-1, 1]) mb.boxB(0.05, 0.28, 0.023, st.trim, w / 2 + 0.027, 0, side * 0.09, { surface: 'wood' });
+    mb.box(0.05, 0.025, 0.22, st.trim, w / 2 + 0.027, 0.28, 0, { surface: 'wood' });
+    mb.box(0.2, 0.04, 0.26, st.base, w / 2 + 0.08, 0.02, 0, { surface: 'stone' });
+    mb.box(0.023, 0.024, 0.02, '#98927d', w / 2 + 0.03, 0.13, 0.04, { surface: 'metal' });
+    if (tier <= 2) {
+      mb.boxB(0.2, 0.42, 0.22, st.base, -w * 0.25, h + roofH * 0.4, -d * 0.15, { surface: 'stone' });
+      mb.box(0.26, 0.04, 0.27, st.base, -w * 0.25, h + roofH * 0.4 + 0.42, -d * 0.15, { surface: 'stone' });
+    }
+  }
   windows(mb, w, d, h * 0.65, st, 1, true);
   mb.pop();
 }
@@ -289,6 +326,15 @@ function tower(mb: MB, r: number, h: number, st: Style, tier: number, x = 0, z =
 function buildBuilding(mb: MB, t: string, tier: number) {
   const st = STYLES[tier];
   const stone = tier >= 3;
+  if (mb.realistic) {
+    mb.surfaces.set(st.wall, tier === 1 ? 'wood' : 'plaster');
+    mb.surfaces.set(st.wall2, tier <= 2 ? 'wood' : 'stone');
+    mb.surfaces.set(st.roof, tier === 1 ? 'thatch' : tier === 4 ? 'slate' : 'tile');
+    mb.surfaces.set(st.roof2, tier === 1 ? 'thatch' : tier === 4 ? 'slate' : 'tile');
+    mb.surfaces.set(st.base, 'stone');
+    mb.surfaces.set(st.trim, tier <= 2 ? 'wood' : 'stone');
+    mb.surfaces.set(st.win, 'cloth');
+  }
   switch (t) {
     case 'town_center': {
       plinth(mb, 3.9, 3.9, st, 0.14);
@@ -609,6 +655,7 @@ function buildBuilding(mb: MB, t: string, tier: number) {
       break;
     }
   }
+  if (mb.realistic) detailBuilding(mb, t, tier);
 }
 
 function wheelsAt(mb: MB, x: number, z: number, r: number) {
@@ -647,7 +694,8 @@ function rubbleModel(mb: MB, s: number) {
 
 // ---------------------------------------------------------------- resources
 
-function tree(mb: MB, v: number, biome: string) {
+function tree(mb: MB, v: number, biome: string, lod = 0) {
+  if (mb.realistic) return realisticTree(mb, v, biome, lod);
   const kind = biome === 'palm' ? (v % 3 === 0 ? 1 : 3) : v % 3;
   const s = 0.85 + ((v * 7) % 10) / 30;
   mb.push(0, 0, 0, 0, (v % 6) * 1.1, 0, s);
@@ -680,6 +728,7 @@ function resource(mb: MB, t: string, v: number) {
       mb.ball(0.2, C.leaf2, 0.7, 0.15, 0.25, {}, 0.6);
       break;
     case 'berry':
+      if (mb.realistic) { realisticDeco(mb, 'berry', v); break; }
       mb.ball(0.32, '#3f7a2a', 0, 0.22, 0, {}, 0.75, 1);
       for (let i = 0; i < 9; i++) mb.ball(0.045, i % 3 ? '#c4283a' : '#7a2a6a', Math.cos(i * 2.4) * 0.28, 0.2 + (i % 3) * 0.08, Math.sin(i * 2.4) * 0.28);
       break;
@@ -713,6 +762,7 @@ function resource(mb: MB, t: string, v: number) {
 // ---------------------------------------------------------------- decorations & effects
 
 function deco(mb: MB, t: string, v: number) {
+  if (mb.realistic && realisticDeco(mb, t, v)) return;
   switch (t) {
     case 'grass':
       for (let i = 0; i < 4; i++) mb.cone(0.03, 0.18, 3, i % 2 ? '#5f9a35' : '#6fae3d', Math.cos(i * 1.7 + v) * 0.08, 0.09, Math.sin(i * 1.7 + v) * 0.08, { rz: (i - 1.5) * 0.25 });
@@ -807,7 +857,7 @@ function buildModel(mb: MB, key: string) {
     case 'found': foundation(mb, +parts[1]); break;
     case 'scaffold': scaffold(mb, +parts[1], +parts[2]); break;
     case 'rubble': rubbleModel(mb, +parts[1]); break;
-    case 'tree': tree(mb, +parts[1], parts[2] ?? ''); break;
+    case 'tree': tree(mb, +parts[1], parts[2] ?? '', +(parts[3] ?? 0)); break;
     case 'n': resource(mb, parts[1], +(parts[2] ?? 0)); break;
     case 'd': deco(mb, parts[1], +(parts[2] ?? 0)); break;
     case 'fx': effect(mb, parts[1]); break;
