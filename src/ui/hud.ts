@@ -226,7 +226,14 @@ export class Hud {
         el.setAttribute('aria-label', c.name);
         el.innerHTML = c.icon + (app.prefs.showHotkeys && i < HOTKEYS.length ? `<span class="hk">${HOTKEYS[i]}</span>` : '') + '<span class="cnt"></span><span class="bar"></span>';
         this.bindCmd(el, i);
-        box.appendChild(el);
+        const slot = document.createElement('div');
+        slot.className = 'cmd-slot';
+        const caption = document.createElement('span');
+        caption.className = 'cmd-caption';
+        caption.setAttribute('aria-hidden', 'true');
+        caption.textContent = ({ eco: 'Build', mil: 'Military', rally: 'Rally', bell: 'Town bell', clear: 'All clear', ungar: 'Exit', am: 'Attack', ag: 'Bombard', reseed: 'Reseed' } as Record<string, string>)[c.key] ?? c.name.replace(/^Train /, '');
+        slot.append(el, caption);
+        box.appendChild(slot);
         return el;
       });
     }
@@ -361,14 +368,15 @@ export class Hud {
     if (!renderer) return;
     const wrap = $('minimap-wrap'), dock = $('bottom').getBoundingClientRect(), style = getComputedStyle($('bottom'));
     const availableWidth = dock.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-    const size = Math.max(80, Math.min(320, availableWidth, dock.top - $('topbar').getBoundingClientRect().bottom - 12));
+    // Leave the right side of a phone available for the world while the map is open.
+    const size = Math.max(80, Math.min(260, availableWidth * 0.68, dock.top - $('topbar').getBoundingClientRect().bottom - 12));
     wrap.style.setProperty('--mini-size', size + 'px');
     wrap.style.bottom = Math.max(4, renderer.height - dock.top + 6) + 'px';
   }
 
-  private renderInfo(details: string, icon: string, name: string, meta: string, health?: number) {
+  private renderInfo(details: string, icon: string, name: string, meta: string, health?: number, stats = '') {
     $('info').innerHTML = `<button class="info-summary" data-info-toggle aria-expanded="${this.infoExpanded}" aria-controls="info-details" aria-label="${name}: show or hide details">
-      <span class="info-thumb">${icon}</span><span class="info-summary-text"><span class="info-name">${name}</span><span class="info-summary-meta">${meta}</span>${health !== undefined ? `<span class="hpbar ${health < 0.3 ? 'low' : health < 0.6 ? 'mid' : ''}"><i style="width:${Math.max(0, Math.min(100, health * 100))}%"></i></span>` : ''}</span><span class="info-chevron" aria-hidden="true">${ICON.expand}</span>
+      <span class="info-thumb">${icon}</span><span class="info-summary-text"><span class="info-name">${name}</span><span class="info-summary-meta">${meta}</span>${health !== undefined ? `<span class="hpbar ${health < 0.3 ? 'low' : health < 0.6 ? 'mid' : ''}"><i style="width:${Math.max(0, Math.min(100, health * 100))}%"></i></span>` : ''}${stats ? `<span class="info-summary-stats">${stats}</span>` : ''}</span><span class="info-chevron" aria-hidden="true">${ICON.expand}</span>
     </button><div id="info-details" class="info-details" role="region" aria-label="Selection details" ${this.infoExpanded ? '' : 'hidden'}><button class="info-close" data-info-toggle aria-label="Close selection details">${ICON.close}</button>${details}</div>`;
   }
 
@@ -405,7 +413,7 @@ export class Hud {
     const e = sel[0];
     let key = e.id + ':';
     let html = '';
-    let summaryIcon = '', summaryName = '', summaryMeta = '';
+    let summaryIcon = '', summaryName = '', summaryMeta = '', summaryStats = '';
     let summaryHealth: number | undefined;
     if (e.k === 'u') {
       const d = unitDef(e.t);
@@ -413,15 +421,16 @@ export class Hud {
       const st = e.o > 0 ? unitStats(owner, e.t) : { hp: d.hp, atk: d.atk, armorM: d.armor[0], armorP: d.armor[1], range: d.range, los: d.los };
       const frac = e.hp / st.hp;
       const status = this.unitStatus(e);
-      key += Math.round(e.hp) + status + (e.ca | 0) + (e.cargo?.length ?? 0) + Math.round(e.rest ?? 0) + ':' + Math.floor(e.food ?? 0);
+      key += Math.round(e.hp) + status + (e.ca | 0) + (e.cargo?.length ?? 0) + Math.round(e.rest ?? 0) + ':' + Math.floor(e.food ?? 0) + `:${st.hp},${st.atk},${st.armorM},${st.armorP},${st.range}`;
       if (key === this.infoKey) return;
       this.infoKey = key;
       const ownerTxt = e.o === 0 ? 'Gaia' : `${owner.name} · ${CIVS[owner.civ].name}`;
       const food = e.food !== undefined && (e.dead !== undefined || d.cls.includes('animal')) ? ` · Food ${Math.floor(e.food)}` : '';
       summaryIcon = `<img alt="" src="${this.unitIconSrc(e, 64)}">`;
       summaryName = d.name;
-      summaryMeta = food ? `Food ${Math.floor(e.food!)} · ${Math.ceil(e.hp)}/${st.hp}` : status;
+      summaryMeta = food ? `Food ${Math.floor(e.food!)} · ${status}` : status;
       summaryHealth = frac;
+      summaryStats = `<span>${Math.ceil(e.hp)}/${st.hp} HP</span>${st.atk ? `<span aria-label="Attack ${Math.round(st.atk)}">${ICON.atk}${Math.round(st.atk)}</span>` : ''}<span aria-label="Melee armour ${st.armorM}">${ICON.marmor}${st.armorM}</span><span aria-label="Pierce armour ${st.armorP}">${ICON.parmor}${st.armorP}</span>${st.range ? `<span aria-label="Range ${st.range}">${ICON.range}${st.range}</span>` : ''}`;
       html = `<div class="portrait"><img src="${this.unitIconSrc(e, 96)}"></div>
 <div class="info-main">
   <div class="info-name">${d.name}</div>
@@ -436,7 +445,7 @@ export class Hud {
       const owner = g.players[e.o];
       const bs = buildingStats(owner, e.t);
       const frac = e.hp / bs.hp;
-      key += Math.round(e.hp) + '|' + e.q.map((q) => String(q.u ?? q.tech) + Math.round((q.t / q.total) * 20)).join(',') + '|' + Math.round(e.prog * 50) + '|' + e.gar.length + '|' + Math.round(e.food ?? 0) + (e.relics?.length ?? 0);
+      key += Math.round(e.hp) + '|' + e.q.map((q) => String(q.u ?? q.tech) + Math.round((q.t / q.total) * 20)).join(',') + '|' + Math.round(e.prog * 50) + '|' + e.gar.length + '|' + Math.round(e.food ?? 0) + (e.relics?.length ?? 0) + `:${bs.hp},${bs.atk},${bs.range},${bs.garrison}`;
       if (key === this.infoKey) return;
       this.infoKey = key;
       let status = '';
@@ -451,6 +460,7 @@ export class Hud {
       const first = e.q[0];
       summaryMeta = first ? `${first.u ? unitDef(first.u).name : TECH_BY_ID[first.tech!].name} ${Math.floor(first.t / first.total * 100)}% · ${e.q.length} queued` : status || `${Math.ceil(e.hp)}/${bs.hp} HP`;
       summaryHealth = frac;
+      summaryStats = `<span>${Math.ceil(e.hp)}/${bs.hp} HP</span>${bs.atk ? `<span aria-label="Attack ${Math.round(bs.atk)}">${ICON.atk}${Math.round(bs.atk)}</span><span aria-label="Range ${bs.range}">${ICON.range}${bs.range}</span>` : ''}${bs.garrison ? `<span aria-label="Garrison ${e.gar.length} of ${bs.garrison}">${ICON.garrison}${e.gar.length}/${bs.garrison}</span>` : ''}`;
       html = `<div class="portrait"><img src="${r.icon(r.buildingKey(e), owner.color)}"></div>
 <div class="info-main">
   <div class="info-name">${d.name}</div>
@@ -472,7 +482,7 @@ export class Hud {
       summaryIcon = ICON.relic; summaryName = 'Relic'; summaryMeta = 'Collect with a Monk';
       html = `<div class="portrait">${ICON.relic}</div><div class="info-main"><div class="info-name">Relic</div><div class="status" style="white-space:normal">Pick up with a Monk and bring to a Monastery for a steady gold income.</div></div>`;
     }
-    this.renderInfo(html, summaryIcon, summaryName, summaryMeta, summaryHealth);
+    this.renderInfo(html, summaryIcon, summaryName, summaryMeta, summaryHealth, summaryStats);
     info.querySelectorAll<HTMLElement>('.qitem').forEach((el) => el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const b = sel[0] as Building;

@@ -27,7 +27,7 @@ Single player against computer opponents — no install, no server.
 **Touch:** tap to select · tap ground/enemy/resource to command · two-finger drag to scroll · pinch to zoom · twist to rotate · long-press + drag to box-select · long-press a button for info.
 **Mouse/keyboard:** left-click select, drag box, right-click command, arrows scroll, wheel zoom, PageUp/PageDown rotate, grid hotkeys (Q W E R…), `.` idle villager, `,` army, `H` Town Center, Ctrl+1–9 groups, `Enter` cheat/chat.
 
-The minimap starts small at the bottom of the screen; tap it to expand, then tap or drag the larger map to move the camera. Close it with × or tap outside. Selection information starts as a compact card with health and a brief status (food remaining for sheep). Tap the card to open full stats or the training queue. Bottom panels sit flush with the screen edge, with their contents kept above the phone's home indicator.
+The minimap starts small at the bottom of the screen; tap it to expand along the left edge, then tap or drag the larger map to move the camera. Close it with × or tap outside. Selection information starts as a compact card with health, combat stats and a brief status (food remaining for sheep). Tap the card to open full details or the training queue. Bottom panels sit flush with the screen edge; stats and command labels use the lower strip while action buttons remain above the phone's home indicator. With villagers selected, tapping a claimed sheep gathers food; with no villagers selected, the sheep can still be selected and moved.
 
 ## Development
 
@@ -36,6 +36,7 @@ npm install
 npm run dev        # http://localhost:5299
 npm run build      # production build in dist/
 npm run check:viewport  # rotation, camera proportions and canvas sizing regression checks
+npm run check:interaction  # mobile sheep commands and food harvesting regression checks
 node --import tsx scripts/simtest.ts 30 arabia 42   # headless AI-vs-AI soak test
 ```
 

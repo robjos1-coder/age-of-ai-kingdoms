@@ -548,6 +548,11 @@ export class App {
     // touch: smart tap
     const units = this.ownUnits();
     const vilSel = units.length > 0 && units.every((u) => u.t === 'villager');
+    // Claimed sheep are friendly units, but a villager tap should still harvest them.
+    if (vilSel && hit?.k === 'u' && hit.t === 'sheep' && hit.o === g.human) {
+      this.command(sx, sy, hit, ground, !!opts.shift);
+      return;
+    }
     if (hit && own(hit)) {
       if (opts.double) { this.selectSameType(hit); return; }
       // villagers tapping their own unfinished / farm / damaged building -> work on it
