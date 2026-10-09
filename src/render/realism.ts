@@ -127,6 +127,7 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
       float roughnessFactor = roughness * scanProperties.g;
       if (abs(vSurface - 9.0) < 0.5) roughnessFactor = max(0.27, roughnessFactor * 0.6);
       if (vSurface > 14.5) roughnessFactor = 0.3;
+      if (abs(vSurface - 13.0) < 0.5) roughnessFactor = 0.66;
     `)
     .replace('#include <metalnessmap_fragment>', `
       float metalnessFactor = abs(vSurface - 9.0) < 0.5 ? 0.82 : vSurface > 14.5 ? 0.85 : 0.0;

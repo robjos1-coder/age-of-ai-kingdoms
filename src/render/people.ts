@@ -111,20 +111,75 @@ const bow = (big = false): Hand => (m) => {
 
 // ---------------------------------------------------------------- head
 
+const FACE = (() => {
+  const geo = new THREE.SphereGeometry(1, 20, 16);
+  const p = geo.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    // A tapered jaw and flatter cheeks instead of a spherical toy head.
+    const jaw = y < -0.2 ? 1 - (-y - 0.2) * 0.25 : 1;
+    p.setXYZ(i, x * (x > 0 ? 0.91 : 0.97), y * 1.08, z * jaw * 0.9);
+  }
+  geo.computeVertexNormals();
+  return geo;
+})();
+const HAIR_CAP = (() => {
+  const geo = new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.68);
+  const p = geo.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    if (p.getX(i) > 0.25 && p.getY(i) < 0.35) p.setY(i, 0.35);
+  }
+  geo.computeVertexNormals();
+  return geo;
+})();
+const HAIR_LOCK = new THREE.SphereGeometry(1, 12, 10);
+const HUMAN_SCALE = [0.86, 1.12, 0.88] as const;
+const APRON = new THREE.CylinderGeometry(0.101, 0.153, 0.23, 14, 3, true, Math.PI / 2 - 0.52, 1.04);
+const CLOTH_BODY = (() => {
+  const geo = new THREE.LatheGeometry([
+    new THREE.Vector2(0.085, -0.082), new THREE.Vector2(0.083, -0.055),
+    new THREE.Vector2(0.087, -0.028), new THREE.Vector2(0.097, 0.013),
+    new THREE.Vector2(0.102, 0.042), new THREE.Vector2(0.071, 0.064),
+    new THREE.Vector2(0.03, 0.083),
+  ], 24);
+  const p = geo.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), angle = Math.atan2(z, x);
+    const fold = Math.sin(angle * 7 + y * 18) * 0.022 + Math.cos(angle * 11 - y * 32) * 0.012;
+    p.setXYZ(i, x * (1 + fold), y, z * (1 + fold));
+  }
+  geo.computeVertexNormals();
+  return geo;
+})();
+
 function head(mb: MB, s: Spec, skin: Col) {
   const y = 0.665;
-  mb.ball(0.08, skin, 0, y, 0, {}, 1.1, 1);
+  if (mb.realistic) mb.add(FACE, skin, 0, y, 0, { surface: 'skin' }, 0.08, 0.08, 0.08);
+  else mb.ball(0.08, skin, 0, y, 0, {}, 1.1, 1);
   // face
   mb.box(mb.realistic ? 0.004 : 0.012, mb.realistic ? 0.008 : 0.02, mb.realistic ? 0.012 : 0.018, C.eye, 0.073, y + 0.012, 0.03);
   mb.box(mb.realistic ? 0.004 : 0.012, mb.realistic ? 0.008 : 0.02, mb.realistic ? 0.012 : 0.018, C.eye, 0.073, y + 0.012, -0.03);
-  mb.box(0.008, 0.008, 0.026, s.hair ?? C.hair, 0.076, y + 0.035, 0.03);
-  mb.box(0.008, 0.008, 0.026, s.hair ?? C.hair, 0.076, y + 0.035, -0.03);
-  mb.box(0.03, 0.032, 0.022, skin, 0.08, y - 0.005, 0);
-  mb.box(0.006, 0.008, 0.032, C.lip, 0.074, y - 0.04, 0);
-  mb.ball(0.018, skin, 0.0, y, 0.081, {}, 1.2);
-  mb.ball(0.018, skin, 0.0, y, -0.081, {}, 1.2);
+  mb.box(mb.realistic ? 0.006 : 0.008, mb.realistic ? 0.004 : 0.008, mb.realistic ? 0.024 : 0.026, s.hair ?? C.hair, 0.076, y + (mb.realistic ? 0.03 : 0.035), 0.03);
+  mb.box(mb.realistic ? 0.006 : 0.008, mb.realistic ? 0.004 : 0.008, mb.realistic ? 0.024 : 0.026, s.hair ?? C.hair, 0.076, y + (mb.realistic ? 0.03 : 0.035), -0.03);
+  mb.box(mb.realistic ? 0.019 : 0.03, mb.realistic ? 0.026 : 0.032, mb.realistic ? 0.018 : 0.022, skin, mb.realistic ? 0.078 : 0.08, y - 0.005, 0);
+  mb.box(mb.realistic ? 0.004 : 0.006, mb.realistic ? 0.004 : 0.008, mb.realistic ? 0.026 : 0.032, C.lip, 0.074, y - 0.04, 0);
+  mb.ball(mb.realistic ? 0.012 : 0.018, skin, 0.0, y, mb.realistic ? 0.077 : 0.081, {}, 1.2);
+  mb.ball(mb.realistic ? 0.012 : 0.018, skin, 0.0, y, mb.realistic ? -0.077 : -0.081, {}, 1.2);
   if (s.beard) { mb.ball(0.062, s.beard, 0.035, y - 0.045, 0, {}, 0.9); mb.box(0.02, 0.012, 0.06, s.beard, 0.074, y - 0.02, 0); }
   const hair = s.hair ?? C.hair;
+  if (mb.realistic && ['hair', 'long', 'bun'].includes(s.head ?? 'hair')) {
+    mb.add(HAIR_CAP, hair, -0.008, y + 0.001, 0, { surface: 'cloth' }, 0.086, 0.09, 0.083);
+    if (s.head === 'long') {
+      for (let lock = 0; lock < 7; lock++) {
+        const angle = 1.7 + lock * 0.48;
+        mb.add(HAIR_LOCK, hair, Math.cos(angle) * 0.067, y - 0.072, Math.sin(angle) * 0.069, { surface: 'cloth', rz: -0.1 }, 0.023, 0.103, 0.021);
+      }
+    } else {
+      mb.add(HAIR_LOCK, hair, -0.054, y - 0.019, 0, { surface: 'cloth' }, 0.034, 0.065, 0.069);
+      if (s.head === 'bun') mb.ball(0.031, hair, -0.086, y + 0.009, 0, { surface: 'cloth' });
+    }
+    return;
+  }
   const cap = (col: Col, sy = 0.62, dy = 0.03, r = 0.087) => mb.ball(r, col, -0.008, y + dy, 0, {}, sy, 1);
   switch (s.head ?? 'hair') {
     case 'hair':
@@ -216,7 +271,8 @@ function head(mb: MB, s: Spec, skin: Col) {
 // ---------------------------------------------------------------- human body
 
 export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
-  const sp = (b: number, x: number, y: number, z: number) => { piv[b * 3] = x + ox; piv[b * 3 + 1] = y + oy; piv[b * 3 + 2] = z; };
+  const scale = mb.realistic ? HUMAN_SCALE : [1, 1, 1];
+  const sp = (b: number, x: number, y: number, z: number) => { piv[b * 3] = x * scale[0] + ox; piv[b * 3 + 1] = y * scale[1] + oy; piv[b * 3 + 2] = z * scale[2]; };
   const b = s.bulk ?? 1;
   const skin = s.skin ?? C.skin;
   sp(BN.PELVIS, 0, 0.38, 0); sp(BN.TORSO, 0, 0.43, 0); sp(BN.HEAD, 0, 0.585, 0);
@@ -225,6 +281,7 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
   sp(BN.THIGH_L, 0, 0.36, -0.055 * b); sp(BN.SHIN_L, 0, 0.2, -0.055 * b); sp(BN.THIGH_R, 0, 0.36, 0.055 * b); sp(BN.SHIN_R, 0, 0.2, 0.055 * b);
   sp(BN.CAPE, -0.08, 0.56, 0);
   mb.push(ox, oy, 0);
+  mb.pushScale(scale[0], scale[1], scale[2]);
   const boots = s.boots ?? C.boot;
   // legs
   for (const side of [-1, 1]) {
@@ -246,6 +303,11 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
   } else if (s.skirt) {
     mb.cyl(0.095 * b, 0.155 * b, 0.27, 9, s.skirt, 0, 0.3, 0);
     mb.cyl(0.157 * b, 0.157 * b, 0.025, 9, C.linen, 0, 0.17, 0);
+    if (mb.realistic) {
+      // A linen apron and sewn seams break up the plain bell-shaped dress.
+      mb.add(APRON, '#d6d4c6', 0, 0.29, 0, { surface: 'cloth' }, b, 1, b);
+      for (const side of [-1, 1]) mb.box(0.012, 0.235, 0.008, s.skirt, 0.045, 0.3, 0.132 * b * side, { surface: 'cloth', rx: side * 0.11 });
+    }
   } else if (s.chain) {
     mb.cyl(0.1 * b, 0.128 * b, 0.13, 9, s.chain, 0, 0.345, 0);
     if (s.tunicTeam) mb.cyl(0.103 * b, 0.124 * b, 0.1, 9, C.team, 0, 0.36, 0, { team: true });
@@ -257,13 +319,19 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
   mb.bone = BN.TORSO;
   mb.push(0, 0.505, 0);
   mb.pushScale(0.82, 1, 1.15 * b);
-  mb.cyl(0.103, 0.085, 0.165, 9, s.shirt, 0, 0, 0, { team: s.shirtTeam });
+  if (mb.realistic) mb.add(CLOTH_BODY, s.shirt, 0, 0, 0, { team: s.shirtTeam, surface: 'cloth' });
+  else mb.cyl(0.103, 0.085, 0.165, 9, s.shirt, 0, 0, 0, { team: s.shirtTeam });
   if (s.chest) mb.cyl(0.108, 0.092, 0.13, 9, s.chest, 0, 0.012, 0);
   mb.pop(); mb.pop();
   if (s.chest && s.tunicTeam) mb.box(0.012, 0.11, 0.08, C.team, 0.088, 0.5, 0, { team: true });
-  if (s.female) { mb.ball(0.04, s.shirt, 0.06, 0.51, 0.045, {}, 0.9); mb.ball(0.04, s.shirt, 0.06, 0.51, -0.045, {}, 0.9); }
-  for (const side of [-1, 1]) mb.ball(0.048 * b, s.pauldron ?? s.chest ?? s.sleeve ?? s.shirt, 0, 0.545, 0.12 * side * b, { team: !s.pauldron && !s.chest && !!(s.sleeveTeam ?? s.shirtTeam) }, 0.85, 1);
-  mb.cyl(0.03, 0.035, 0.05, 7, skin, 0, 0.585, 0);
+  if (s.female && !mb.realistic) { mb.ball(0.04, s.shirt, 0.06, 0.51, 0.045, {}, 0.9); mb.ball(0.04, s.shirt, 0.06, 0.51, -0.045, {}, 0.9); }
+  for (const side of [-1, 1]) mb.ball((mb.realistic && !s.pauldron ? 0.036 : 0.048) * b, s.pauldron ?? s.chest ?? s.sleeve ?? s.shirt, 0, 0.545, 0.12 * side * b, { team: !s.pauldron && !s.chest && !!(s.sleeveTeam ?? s.shirtTeam) }, 0.85, 1);
+  mb.cyl(mb.realistic ? 0.024 : 0.03, mb.realistic ? 0.027 : 0.035, 0.05, 7, skin, 0, 0.585, 0);
+  if (mb.realistic && s.style === STYLE.NONE) {
+    mb.box(0.008, 0.032, 0.075, '#d6d4c6', 0.077, 0.554, 0, { surface: 'cloth' });
+    mb.box(0.008, 0.1, 0.012, '#bfc2b3', 0.084, 0.502, 0, { surface: 'cloth' });
+    for (let i = 0; i < 3; i++) mb.ball(0.004, '#5c594d', 0.089, 0.53 - i * 0.025, 0, { surface: 'cloth' });
+  }
   if (s.quiver) { mb.cyl(0.032, 0.028, 0.24, 7, C.leather, -0.09, 0.53, 0.04, { rx: 0.35 }); for (let i = 0; i < 3; i++) mb.box(0.006, 0.06, 0.006, C.white, -0.09 + i * 0.01, 0.67, 0.08 - i * 0.012, { rx: 0.35 }); }
   if (s.cape) {
     mb.bone = BN.CAPE;
@@ -272,7 +340,9 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
   }
   // head
   mb.bone = BN.HEAD;
+  if (mb.realistic) { mb.push(0, 0.665, 0); mb.pushScale(0.67, 0.64, 0.65); mb.push(0, -0.665, 0); }
   head(mb, s, skin);
+  if (mb.realistic) { mb.pop(); mb.pop(); mb.pop(); }
   // arms
   for (const side of [-1, 1]) {
     const R = side > 0;
@@ -282,7 +352,11 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
     mb.bone = R ? BN.LARM_R : BN.LARM_L;
     mb.cyl(0.029 * b, 0.024 * b, 0.12, 7, s.forearm ?? skin, 0, 0.345, z(0.132));
     mb.bone = R ? BN.HAND_R : BN.HAND_L;
-    mb.ball(0.027, s.forearm && s.forearm !== C.leather ? s.forearm : skin, 0, 0.265, z(0.135));
+    const hand = s.forearm && s.forearm !== C.leather ? s.forearm : skin;
+    if (mb.realistic) {
+      mb.box(0.036, 0.05, 0.025, hand, 0, 0.265, z(0.135), { surface: s.forearm ? 'leather' : 'skin' });
+      mb.ball(0.008, hand, 0.02, 0.276, z(0.135), { surface: s.forearm ? 'leather' : 'skin' }, 1.4);
+    } else mb.ball(0.027, hand, 0, 0.265, z(0.135));
     mb.push(0, 0.28, z(0.135));
     const item = R ? s.right : s.left;
     if (item) item(mb);
@@ -290,7 +364,7 @@ export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
     mb.pop();
   }
   mb.bone = 0;
-  mb.pop();
+  mb.pop(); mb.pop();
 }
 
 function shield(mb: MB, sh: NonNullable<Spec['shield']>) {
@@ -330,9 +404,10 @@ function villager(mb: MB, variant: string, piv: Float32Array) {
   };
   const left: Hand = (m) => { m.tag = TAG.BASKET; basket!(m); m.tag = 0; };
   const spec: Spec = fem
-    ? { style: STYLE.NONE, skin, hair, shirt: '#b98a5c', pants: '#6e5038', skirt: k % 2 ? '#8c6844' : '#7a6a8a', head: k % 2 ? 'bun' : 'long', belt: C.team, female: true, right, left }
+    ? { style: STYLE.NONE, skin, hair, shirt: '#365f68', pants: '#6e5038', skirt: mb.realistic ? (k % 2 ? '#634a50' : '#485663') : k % 2 ? '#8c6844' : '#7a6a8a', head: k % 2 ? 'bun' : 'long', belt: C.team, female: true, right, left }
     : { style: STYLE.NONE, skin, hair, shirt: k % 2 ? C.linen : C.linen2, pants: k % 2 ? C.brown : '#5d5a4a', head: k % 3 === 2 ? 'straw' : 'hair', belt: C.team, beard: k % 2 ? hair : undefined, right, left };
   human(mb, spec, piv);
+  if (mb.realistic) mb.pushScale(...HUMAN_SCALE);
   // team neckerchief so villagers read as team-coloured from afar
   mb.bone = BN.TORSO;
   mb.cyl(0.05, 0.075, 0.035, 8, C.team, 0, 0.565, 0, { team: true });
@@ -348,6 +423,7 @@ function villager(mb: MB, variant: string, piv: Float32Array) {
   mb.cyl(0.07, 0.05, 0.08, 8, C.straw, -0.01, 0.65, -0.13); mb.ball(0.03, '#c4283a', 0, 0.69, -0.11); mb.ball(0.03, '#e07a2a', -0.02, 0.69, -0.15);
   mb.tag = 0;
   mb.bone = 0;
+  if (mb.realistic) mb.pop();
 }
 
 export const TAG = { AXE: 1, PICK: 2, HOE: 3, HAMMER: 4, KNIFE: 5, ROD: 6, SPEAR: 7, BASKET: 8, C_WOOD: 11, C_GOLD: 12, C_STONE: 13, C_FOOD: 14, RELIC: 15 } as const;
@@ -655,11 +731,13 @@ export function buildRigged(mb: MB, t: string, variant: string): Rig {
     style = s.style;
     human(mb, s, piv);
     if (t === 'monk') {
+      if (mb.realistic) mb.pushScale(...HUMAN_SCALE);
       mb.bone = BN.TORSO;
       mb.tag = TAG.RELIC;
       mb.box(0.1, 0.08, 0.09, C.gold, 0.12, 0.47, 0);
       mb.box(0.02, 0.06, 0.02, '#b6402f', 0.17, 0.48, 0);
       mb.tag = 0; mb.bone = 0;
+      if (mb.realistic) mb.pop();
     }
   }
   return { piv, mounted, quad: quadOnly, style, graze: t === 'sheep' || t === 'deer' };

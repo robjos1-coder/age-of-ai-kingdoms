@@ -23,6 +23,8 @@ export class Hud {
   private miniBase: ImageData | null = null;
   private miniCanvas: HTMLCanvasElement | null = null;
   private tipFor: string | null = null;
+  private infoExpanded = false;
+  private selectionKey = '';
 
   constructor(app: App) {
     this.app = app;
@@ -47,7 +49,11 @@ export class Hud {
   <button class="side" id="sb-collapse" title="Hide panel">${ICON.collapse}</button>
 </div>
 <div id="bottom" class="hidden">
-  <div id="minimap-wrap"><canvas id="minimap"></canvas></div>
+  <div id="minimap-wrap">
+    <canvas id="minimap" aria-label="World map"></canvas>
+    <button id="minimap-toggle" aria-label="Expand map" aria-expanded="false" aria-controls="minimap">${ICON.expand}</button>
+    <button id="minimap-close" aria-label="Close map">${ICON.close}</button>
+  </div>
   <div id="info" class="empty"></div>
   <div id="cmds" class="empty"></div>
 </div>
@@ -65,21 +71,43 @@ export class Hud {
     on('sb-box', () => { this.app.boxMode = !this.app.boxMode; $('sb-box').classList.toggle('on', this.app.boxMode); if (this.app.boxMode) this.toast('Drag to select units', undefined, 1500); });
     on('sb-desel', () => this.app.deselect());
     on('sb-collapse', () => {
+      this.closePopouts();
       document.body.classList.toggle('panel-collapsed');
       $('sb-collapse').innerHTML = document.body.classList.contains('panel-collapsed') ? ICON.expand : ICON.collapse;
     });
+    on('minimap-toggle', () => this.setMapExpanded(true));
+    on('minimap-close', () => this.setMapExpanded(false));
+    $('info').addEventListener('click', (e) => {
+      if (!(e.target as HTMLElement).closest('[data-info-toggle]')) return;
+      e.stopPropagation();
+      this.setInfoExpanded(!this.infoExpanded);
+    });
+    document.addEventListener('pointerdown', (e) => {
+      const target = e.target as Node;
+      if (!$('info').contains(target)) this.setInfoExpanded(false);
+      if (!$('minimap-wrap').contains(target)) this.setMapExpanded(false);
+    }, true);
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || (!this.infoExpanded && !$('minimap-wrap').classList.contains('expanded'))) return;
+      e.preventDefault(); e.stopPropagation();
+      const focus = this.infoExpanded ? $('info').querySelector<HTMLButtonElement>('.info-summary') : $('minimap-toggle');
+      this.closePopouts();
+      focus?.focus();
+    }, true);
     if (!isTouch()) $('sb-box').classList.add('hidden');
     this.initMinimap();
   }
 
   show(on: boolean) {
     for (const id of ['topbar', 'sidebtns', 'bottom']) $(id).classList.toggle('hidden', !on);
-    if (!on) { $('modebar').classList.add('hidden'); $('tooltip').classList.add('hidden'); }
+    if (!on) { this.closePopouts(); $('modebar').classList.add('hidden'); $('tooltip').classList.add('hidden'); }
   }
 
   reset() {
     this.cmdKeys = '';
     this.infoKey = '';
+    this.selectionKey = '';
+    this.closePopouts();
     this.miniBase = null;
     this.dirty = true;
     $('toasts').innerHTML = '';
@@ -170,6 +198,8 @@ export class Hud {
     $('btn-pause').innerHTML = app.paused ? ICON.speed : ICON.pause;
     this.updateInfo();
     this.updateCmds();
+    if (this.infoExpanded) this.positionInfoDetails();
+    if ($('minimap-wrap').classList.contains('expanded')) this.positionMap();
     this.dirty = false;
   }
 
@@ -181,6 +211,11 @@ export class Hud {
     this.cmds = cmds;
     const box = $('cmds');
     box.classList.toggle('empty', cmds.length === 0);
+    $('bottom').classList.toggle('many-commands', cmds.length > 3);
+    // Portrait leaves one narrow column for the map; phone buttons occupy 48px including their gap.
+    const maxColumns = window.matchMedia('(orientation: portrait)').matches ? Math.max(1, Math.min(6, Math.floor((app.canvas.clientWidth - 78) / 48))) : 8;
+    const columns = Math.max(1, Math.ceil(cmds.length / Math.max(1, Math.ceil(cmds.length / maxColumns))));
+    box.style.setProperty('--cmd-columns', String(columns));
     const keys = cmds.map((c) => c.key).join(',');
     if (keys !== this.cmdKeys) {
       this.cmdKeys = keys;
@@ -188,6 +223,7 @@ export class Hud {
       this.cmdEls = cmds.map((c, i) => {
         const el = document.createElement('button');
         el.className = 'cmd';
+        el.setAttribute('aria-label', c.name);
         el.innerHTML = c.icon + (app.prefs.showHotkeys && i < HOTKEYS.length ? `<span class="hk">${HOTKEYS[i]}</span>` : '') + '<span class="cnt"></span><span class="bar"></span>';
         this.bindCmd(el, i);
         box.appendChild(el);
@@ -280,12 +316,70 @@ export class Hud {
 
   // ------------------------------------------------------------------ info panel
 
+  closePopouts() {
+    this.setInfoExpanded(false);
+    this.setMapExpanded(false);
+  }
+
+  private setInfoExpanded(on: boolean) {
+    if (on) this.setMapExpanded(false);
+    this.infoExpanded = on;
+    const info = $('info');
+    info.classList.toggle('expanded', on);
+    info.querySelector('.info-summary')?.setAttribute('aria-expanded', String(on));
+    const details = info.querySelector<HTMLElement>('.info-details');
+    if (details) details.hidden = !on;
+    if (on) this.positionInfoDetails();
+  }
+
+  private positionInfoDetails() {
+    const details = $('info').querySelector<HTMLElement>('.info-details');
+    const renderer = this.app.renderer;
+    if (!details || !renderer) return;
+    const dock = $('bottom').getBoundingClientRect(), style = getComputedStyle($('bottom'));
+    const left = dock.left + parseFloat(style.paddingLeft), right = dock.right - parseFloat(style.paddingRight);
+    const width = Math.min(360, right - left);
+    details.style.width = width + 'px';
+    details.style.left = Math.max(left, Math.min($('info').getBoundingClientRect().left, right - width)) + 'px';
+    details.style.bottom = Math.max(4, renderer.height - dock.top + 6) + 'px';
+    details.style.maxHeight = Math.max(80, dock.top - $('topbar').getBoundingClientRect().bottom - 12) + 'px';
+  }
+
+  private setMapExpanded(on: boolean) {
+    const wrap = $('minimap-wrap');
+    if (wrap.classList.contains('expanded') === on) return;
+    if (on) this.setInfoExpanded(false);
+    wrap.classList.toggle('expanded', on);
+    $('minimap-toggle').setAttribute('aria-expanded', String(on));
+    if (on) this.positionMap();
+    else { wrap.style.removeProperty('--mini-size'); wrap.style.removeProperty('bottom'); }
+    this.drawMinimap();
+  }
+
+  private positionMap() {
+    const renderer = this.app.renderer;
+    if (!renderer) return;
+    const wrap = $('minimap-wrap'), dock = $('bottom').getBoundingClientRect(), style = getComputedStyle($('bottom'));
+    const availableWidth = dock.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const size = Math.max(80, Math.min(320, availableWidth, dock.top - $('topbar').getBoundingClientRect().bottom - 12));
+    wrap.style.setProperty('--mini-size', size + 'px');
+    wrap.style.bottom = Math.max(4, renderer.height - dock.top + 6) + 'px';
+  }
+
+  private renderInfo(details: string, icon: string, name: string, meta: string, health?: number) {
+    $('info').innerHTML = `<button class="info-summary" data-info-toggle aria-expanded="${this.infoExpanded}" aria-controls="info-details" aria-label="${name}: show or hide details">
+      <span class="info-thumb">${icon}</span><span class="info-summary-text"><span class="info-name">${name}</span><span class="info-summary-meta">${meta}</span>${health !== undefined ? `<span class="hpbar ${health < 0.3 ? 'low' : health < 0.6 ? 'mid' : ''}"><i style="width:${Math.max(0, Math.min(100, health * 100))}%"></i></span>` : ''}</span><span class="info-chevron" aria-hidden="true">${ICON.expand}</span>
+    </button><div id="info-details" class="info-details" role="region" aria-label="Selection details" ${this.infoExpanded ? '' : 'hidden'}><button class="info-close" data-info-toggle aria-label="Close selection details">${ICON.close}</button>${details}</div>`;
+  }
+
   private updateInfo() {
     const app = this.app;
     const g = app.game!;
     const r = app.renderer!;
     const sel = app.selected();
     const info = $('info');
+    const selectionKey = sel.map((e) => e.id).join(',');
+    if (selectionKey !== this.selectionKey) { this.setInfoExpanded(false); this.selectionKey = selectionKey; }
     if (!sel.length) { info.classList.add('empty'); info.innerHTML = ''; this.infoKey = ''; return; }
     info.classList.remove('empty');
     const me = g.human;
@@ -302,24 +396,32 @@ export class Hud {
         if (e.k === 'b') return `<div class="mu" data-id="${e.id}"><img src="${r.icon(`b:${e.t}:2`, g.players[e.o].color, 64)}"></div>`;
         return '';
       }).join('');
-      info.innerHTML = `<div class="multi">${items}${sel.length > max ? `<div class="mu" style="display:grid;place-items:center;font-weight:700">+${sel.length - max}</div>` : ''}</div>`;
+      const first = sel[0];
+      const icon = first.k === 'u' ? `<img alt="" src="${this.unitIconSrc(first, 64)}">` : first.k === 'b' ? `<img alt="" src="${r.icon(r.buildingKey(first), g.players[first.o].color, 64)}">` : ICON.pop;
+      this.renderInfo(`<div class="multi">${items}${sel.length > max ? `<div class="mu" style="display:grid;place-items:center;font-weight:700">+${sel.length - max}</div>` : ''}</div>`, icon, `${sel.length} selected`, 'Tap for unit list');
       info.querySelectorAll<HTMLElement>('.mu[data-id]').forEach((el) => el.addEventListener('click', (ev) => { ev.stopPropagation(); app.select([+el.dataset.id!]); }));
       return;
     }
     const e = sel[0];
     let key = e.id + ':';
     let html = '';
+    let summaryIcon = '', summaryName = '', summaryMeta = '';
+    let summaryHealth: number | undefined;
     if (e.k === 'u') {
       const d = unitDef(e.t);
       const owner = g.players[e.o];
       const st = e.o > 0 ? unitStats(owner, e.t) : { hp: d.hp, atk: d.atk, armorM: d.armor[0], armorP: d.armor[1], range: d.range, los: d.los };
       const frac = e.hp / st.hp;
       const status = this.unitStatus(e);
-      key += Math.round(e.hp) + status + (e.ca | 0) + (e.cargo?.length ?? 0) + Math.round(e.rest ?? 0);
+      key += Math.round(e.hp) + status + (e.ca | 0) + (e.cargo?.length ?? 0) + Math.round(e.rest ?? 0) + ':' + Math.floor(e.food ?? 0);
       if (key === this.infoKey) return;
       this.infoKey = key;
       const ownerTxt = e.o === 0 ? 'Gaia' : `${owner.name} · ${CIVS[owner.civ].name}`;
       const food = e.food !== undefined && (e.dead !== undefined || d.cls.includes('animal')) ? ` · Food ${Math.floor(e.food)}` : '';
+      summaryIcon = `<img alt="" src="${this.unitIconSrc(e, 64)}">`;
+      summaryName = d.name;
+      summaryMeta = food ? `Food ${Math.floor(e.food!)} · ${Math.ceil(e.hp)}/${st.hp}` : status;
+      summaryHealth = frac;
       html = `<div class="portrait"><img src="${this.unitIconSrc(e, 96)}"></div>
 <div class="info-main">
   <div class="info-name">${d.name}</div>
@@ -344,6 +446,11 @@ export class Hud {
       else if (e.t === 'monastery') status = `Relics: ${e.relics?.length ?? 0} (+${((e.relics?.length ?? 0) * 0.5).toFixed(1)} gold/s)`;
       else if (bs.atk) status = `Arrows: ${Math.round(bs.atk)} dmg · range ${bs.range}`;
       const queue = e.o === me && e.q.length ? `<div class="queue">${this.queueHtml(e)}</div>` : '';
+      summaryIcon = `<img alt="" src="${r.icon(r.buildingKey(e), owner.color, 64)}">`;
+      summaryName = d.name;
+      const first = e.q[0];
+      summaryMeta = first ? `${first.u ? unitDef(first.u).name : TECH_BY_ID[first.tech!].name} ${Math.floor(first.t / first.total * 100)}% · ${e.q.length} queued` : status || `${Math.ceil(e.hp)}/${bs.hp} HP`;
+      summaryHealth = frac;
       html = `<div class="portrait"><img src="${r.icon(r.buildingKey(e), owner.color)}"></div>
 <div class="info-main">
   <div class="info-name">${d.name}</div>
@@ -357,13 +464,15 @@ export class Hud {
       if (key === this.infoKey) return;
       this.infoKey = key;
       const nd = NODE_DEFS[e.t];
+      summaryIcon = ICON[nd.res]; summaryName = nd.name; summaryMeta = `${Math.floor(e.amt)} ${nd.res}`;
       html = `<div class="portrait">${ICON[nd.res]}</div><div class="info-main"><div class="info-name">${nd.name}</div><div class="status">${Math.floor(e.amt)} ${nd.res} remaining</div></div>`;
     } else if (e.k === 'relic') {
       if (this.infoKey === key) return;
       this.infoKey = key;
+      summaryIcon = ICON.relic; summaryName = 'Relic'; summaryMeta = 'Collect with a Monk';
       html = `<div class="portrait">${ICON.relic}</div><div class="info-main"><div class="info-name">Relic</div><div class="status" style="white-space:normal">Pick up with a Monk and bring to a Monastery for a steady gold income.</div></div>`;
     }
-    info.innerHTML = html;
+    this.renderInfo(html, summaryIcon, summaryName, summaryMeta, summaryHealth);
     info.querySelectorAll<HTMLElement>('.qitem').forEach((el) => el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const b = sel[0] as Building;
@@ -435,6 +544,7 @@ export class Hud {
     const cv = $<HTMLCanvasElement>('minimap');
     const handle = (e: PointerEvent) => {
       const app = this.app;
+      if (!$('minimap-wrap').classList.contains('expanded')) return;
       if (!app.game || !app.renderer) return;
       const w = this.miniToWorld(e);
       if (!w) return;
@@ -448,6 +558,8 @@ export class Hud {
     cv.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); down = true; try { cv.setPointerCapture(e.pointerId); } catch { /* ignore */ } handle(e); });
     cv.addEventListener('pointermove', (e) => { if (down && e.buttons !== 2) handle(e); });
     cv.addEventListener('pointerup', (e) => { down = false; try { cv.releasePointerCapture(e.pointerId); } catch { /* ignore */ } });
+    cv.addEventListener('pointercancel', () => { down = false; });
+    cv.addEventListener('lostpointercapture', () => { down = false; });
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 

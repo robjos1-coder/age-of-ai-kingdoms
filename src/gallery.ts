@@ -100,9 +100,14 @@ export function runGallery(which: string) {
     const mats = { lit, unlit: basic, add: basic, overlay: basic, ghost: basic } as Record<MatKind, THREE.Material>;
     const B = new Batches(scene, mats, undefined, realistic, assets?.model, wind);
     const only = which.split(':').slice(1);
+    const villagerVariant = /^[fm]\d+$/.test(only.at(-1) ?? '') ? only.pop()! : 'm1';
     const types = only.length ? only : [...RIGGED];
     const hClips = [CLIP.IDLE, CLIP.WALK, CLIP.READY, CLIP.SWING, CLIP.THRUST, CLIP.BOW, CLIP.AIM, CLIP.THROW, CLIP.CHOP, CLIP.HOE, CLIP.FORAGE, CLIP.HAMMER, CLIP.PRAY, CLIP.CARRY, CLIP.HEAL, CLIP.DEAD];
     const col = new THREE.Color('#2f6fe4');
+    types.forEach((t, row) => {
+      const clips = QUADS.has(t) ? [QCLIP.IDLE, QCLIP.WALK, QCLIP.GALLOP, QCLIP.ATTACK, QCLIP.DEAD] : hClips;
+      clips.forEach((clip, i) => focuses.set(`${t}: clip ${clip}`, [i * 1.3 + (realistic ? 6 : 0), row * (only.length ? 2.5 : 1.5) + (realistic ? 6 : 0)]));
+    });
     animate = (time: number) => {
       B.begin();
       types.forEach((t, row) => {
@@ -111,7 +116,7 @@ export function runGallery(which: string) {
         clips.forEach((c, i) => {
           const cyclic = quad ? c !== QCLIP.ATTACK : ![CLIP.SWING, CLIP.THRUST, CLIP.BOW, CLIP.AIM, CLIP.THROW].includes(c as never);
           const ph = cyclic ? time * (c === CLIP.IDLE ? 0.25 : 1) : (time * 0.8) % 1.3 / 1.3;
-          const key = t === 'villager' ? 'r:villager:m1' : `r:${t}:`;
+          const key = t === 'villager' ? `r:villager:${villagerVariant}` : `r:${t}:`;
           const show0 = t === 'villager' ? (c === CLIP.HOE ? TAG.HOE : c === CLIP.HAMMER ? TAG.HAMMER : c === CLIP.FORAGE ? TAG.BASKET : TAG.AXE) : 0;
           const show1 = t === 'villager' && c === CLIP.CARRY ? TAG.C_WOOD : 0;
           const roll = c === (quad ? QCLIP.DEAD : CLIP.DEAD) ? 1.45 : 0;

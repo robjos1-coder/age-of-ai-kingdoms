@@ -131,6 +131,53 @@ export function realisticDeco(mb: MB, type: string, variant: number): boolean {
   return false;
 }
 
+/** Fractured, partly buried ore outcrops with mineral seams flush to their rock faces. */
+export function realisticDeposit(mb: MB, type: 'gold' | 'stone', variant: number) {
+  const rnd = random(4721 + variant * 173 + (type === 'gold' ? 0 : 991));
+  for (let rock = 0; rock < 6; rock++) {
+    const radius = rock === 0 ? 0.34 : 0.1 + rnd() * 0.15;
+    const angle = rnd() * Math.PI * 2;
+    const distance = rock === 0 ? 0 : 0.16 + rnd() * 0.17;
+    const geo = new THREE.IcosahedronGeometry(1, 2);
+    const p = geo.getAttribute('position');
+    const seed = variant * 3.1 + rock * 7.3;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      // Coordinate-based noise keeps shared vertices together; clipped planes
+      // create exposed fractures instead of smooth spheres or stacked cubes.
+      const n = 1 + Math.sin(x * 9 + y * 13 + z * 7 + seed) * 0.09 + Math.sin(x * 21 - z * 17 + seed) * 0.04;
+      p.setXYZ(i, Math.min(0.78, x) * n, Math.min(0.82, Math.max(-0.68, y)) * n * (0.66 + rock % 3 * 0.08), z * n);
+    }
+    geo.computeVertexNormals();
+    mb.push(Math.cos(angle) * distance, radius * 0.31 - 0.025, Math.sin(angle) * distance, rnd() * 0.18, rnd() * 6.28, rnd() * 0.18, radius);
+    mb.add(geo, type === 'gold' ? ['#ad8d5e', '#9c805c', '#8f7758'][rock % 3] : ['#78808b', '#8d949b', '#69737d'][rock % 3], 0, 0, 0, { surface: 'rock' });
+    const veins: number[] = [], quartz: number[] = [];
+    for (let i = 0; i < p.count; i += 3) {
+      const a = new THREE.Vector3().fromBufferAttribute(p, i);
+      const b = new THREE.Vector3().fromBufferAttribute(p, i + 1);
+      const c = new THREE.Vector3().fromBufferAttribute(p, i + 2);
+      const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
+      if (normal.y < 0.12 || rnd() > (type === 'gold' ? 0.32 : 0.14)) continue;
+      const start = a.clone().lerp(c, 0.24 + rnd() * 0.18), end = b.clone().lerp(c, 0.25);
+      const goldSeam = type === 'gold' && rnd() > 0.35;
+      const width = goldSeam ? 0.12 + rnd() * 0.16 : 0.04 + rnd() * 0.06;
+      const points = [start, end, end.clone().lerp(c, width), start.clone().lerp(c, width)];
+      const target = goldSeam ? veins : quartz;
+      for (const j of [0, 1, 2, 0, 2, 3]) target.push(...points[j].clone().addScaledVector(normal, 0.006).toArray());
+    }
+    for (const [positions, color, surface] of [[veins, '#bda576', 'gold'], [quartz, '#b7b6ab', 'rock']] as const) {
+      if (!positions.length) continue;
+      const seams = new THREE.BufferGeometry();
+      seams.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      seams.computeVertexNormals();
+      mb.add(seams, color, 0, 0, 0, { surface });
+      seams.dispose();
+    }
+    mb.pop();
+    geo.dispose();
+  }
+}
+
 export function gableDetails(mb: MB, w: number, d: number, h: number, color: Col, x: number, y: number, z: number, o: PieceOpts) {
   mb.push(x, y, z, o.rx, o.ry, o.rz);
   const surface = mb.surfaces.get(color) ?? 'tile';

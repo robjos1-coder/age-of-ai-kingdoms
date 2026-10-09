@@ -27,6 +27,8 @@ Single player against computer opponents — no install, no server.
 **Touch:** tap to select · tap ground/enemy/resource to command · two-finger drag to scroll · pinch to zoom · twist to rotate · long-press + drag to box-select · long-press a button for info.
 **Mouse/keyboard:** left-click select, drag box, right-click command, arrows scroll, wheel zoom, PageUp/PageDown rotate, grid hotkeys (Q W E R…), `.` idle villager, `,` army, `H` Town Center, Ctrl+1–9 groups, `Enter` cheat/chat.
 
+The minimap starts small at the bottom of the screen; tap it to expand, then tap or drag the larger map to move the camera. Close it with × or tap outside. Selection information starts as a compact card with health and a brief status (food remaining for sheep). Tap the card to open full stats or the training queue. Bottom panels sit flush with the screen edge, with their contents kept above the phone's home indicator.
+
 ## Development
 
 ```bash
@@ -40,6 +42,7 @@ node --import tsx scripts/simtest.ts 30 arabia 42   # headless AI-vs-AI soak tes
 Open `#gallery`, `#gallery=buildings` or `#gallery=misc` on the dev server to browse every model.
 Add `-realism` to preview the new art, for example `#gallery=buildings-realism`, `#gallery=misc-realism`, or `#gallery=people:villager-realism`.
 The building/resource galleries include a model selector for close inspection.
+Animated people also have a focus selector. Add a villager appearance to inspect it, for example `#gallery=people:villager:f1-realism` for a woman or `#gallery=people:villager:m2-realism` for a man.
 On the dev server, add `?graphicsStats` to log average frame rate, rendering CPU time and triangle count every four seconds while testing settings.
 
 ### Realistic graphics
@@ -49,6 +52,8 @@ On the dev server, add `?graphicsStats` to log average frame rate, rendering CPU
 The realistic world uses local 1K photographic scans packed into padded texture atlases: color, OpenGL normals and ambient occlusion/roughness/metalness. Ground surfaces blend grass, mud, sand, forest litter, snow and rock; greener maps use a separate lush grass scan. Material textures cover timber, masonry, plaster, roofs, bark, metal, linen, leather and wool. Higher polygon geometry adds leaf canopies and branches, rounded people and animals, sheep fleece, framed windows, roof courses, coopered barrels, paving, ship rigging and curved sails. Sheep render about 18% smaller than in classic mode without changing their gameplay size.
 
 Water uses two animated normal layers, depth-dependent color/transparency, shoreline foam, HDR reflections and periodically refreshed planar reflections of the world. Fog of war applies to terrain, models and reflections.
+
+Realistic people use slimmer adult proportions, smaller anatomically shaped heads, fitted hair, shaped hands, collars, garment seams and aprons. Women's blouses are muted teal, visibly distinct from every skin tone. Gold and stone are fractured, partly buried rock outcrops with mineral seams on their faces rather than smooth rocks with oversized nuggets.
 
 AoE4 screenshots informed the softer daylight, greener coastal terrain and atmospheric depth at the wide RTS camera angle. **Settings → Atmospheric haze** is also on by default. Haze is calculated per vertex in the existing world shaders, blended before fog of war, and scales with camera zoom. It adds no render pass, framebuffer or texture sampling. Turning it off applies immediately without rebuilding the world.
 

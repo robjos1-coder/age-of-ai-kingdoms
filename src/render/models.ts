@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { MB, type Col } from './mb';
 import { buildRigged } from './people';
 import type { Rig } from './rig';
-import { realisticTree, realisticDeco, detailBuilding, detailShip, detailSiege } from './realism-models';
+import { realisticTree, realisticDeco, realisticDeposit, detailBuilding, detailShip, detailSiege } from './realism-models';
 
 export interface ModelGeo {
   base: THREE.BufferGeometry;
@@ -721,6 +721,7 @@ function tree(mb: MB, v: number, biome: string, lod = 0) {
 }
 
 function resource(mb: MB, t: string, v: number) {
+  if (mb.realistic && (t === 'gold' || t === 'stone')) { realisticDeposit(mb, t, v); return; }
   switch (t) {
     case 'stump':
       mb.cylB(0.12, 0.14, 0.15, 7, C.trunk, 0, 0, 0);

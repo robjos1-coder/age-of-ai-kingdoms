@@ -211,6 +211,7 @@ export class Input {
     }
     const target = e.target as HTMLElement;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT')) return;
+    if ((e.key === 'Enter' || e.key === ' ') && target?.closest('[data-info-toggle], #minimap-toggle, #minimap-close')) return;
     const app = this.app;
     const k = e.key.toLowerCase();
     this.keys.add(k);

@@ -13,7 +13,8 @@ for (const type of Object.keys(UNITS)) {
   if (RIGGED.has(type)) keys.push(`r:${type}:${type === 'villager' ? 'm1' : ''}`);
   else for (const pose of ['idle', 'walk1', 'atk1', 'atk2', 'dead']) keys.push(`u:${type}:${pose}:${type === 'trebuchet' ? 'deployed' : ''}`);
 }
-keys.push('r:villager:f2', 'u:trebuchet:idle:packed');
+for (const sex of ['m', 'f']) for (let variant = 0; variant < 4; variant++) keys.push(`r:villager:${sex}${variant}`);
+keys.push('u:trebuchet:idle:packed');
 for (let v = 0; v < 6; v++) keys.push(`tree:${v}:`, `tree:${v}:palm`);
 for (let v = 0; v < 6; v++) for (const lod of [1, 2]) keys.push(`tree:${v}::${lod}`, `tree:${v}:palm:${lod}`);
 for (const type of ['stump', 'berry', 'gold', 'stone', 'fish', 'relic']) for (let v = 0; v < 5; v++) keys.push(`n:${type}:${v}`);

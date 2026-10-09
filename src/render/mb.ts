@@ -80,7 +80,7 @@ export class MB {
     const surface = o.surface ?? (o.team ? 'cloth' : this.surfaces.get(color) ?? surfaceFor(color, this.context));
     const slot = SURFACE[surface];
     if (this.realistic && !['leaf', 'skin', 'cloth', 'leather', 'wool'].includes(surface)) {
-      tmpC.lerp(WHITE, surface === 'slate' ? 0.32 : surface === 'tile' ? 0.6 : surface === 'thatch' ? 0.65 : 0.8);
+      tmpC.lerp(WHITE, surface === 'rock' ? 0.2 : surface === 'slate' ? 0.32 : surface === 'tile' ? 0.6 : surface === 'thatch' ? 0.65 : 0.8);
     }
     const density = SURFACE_SCALE[slot];
     const n = pos.count;
