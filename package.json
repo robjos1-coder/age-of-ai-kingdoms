@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "check:graphics": "node --import tsx scripts/graphicscheck.ts"
+    "check:graphics": "node --import tsx scripts/graphicscheck.ts",
+    "check:viewport": "node --import tsx scripts/viewportcheck.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

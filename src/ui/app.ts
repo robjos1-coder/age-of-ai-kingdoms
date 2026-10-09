@@ -180,6 +180,9 @@ export class App {
 
   private frame = (now: number) => {
     if (!this.running || !this.game || !this.renderer) return;
+    // iOS standalone resize events can precede the final canvas layout. Sync
+    // before input, rendering and the minimap; unchanged sizes are a cheap no-op.
+    this.renderer.resize();
     const g = this.game;
     let dt = (now - this.lastT) / 1000;
     this.lastT = now;

@@ -33,6 +33,7 @@ Single player against computer opponents — no install, no server.
 npm install
 npm run dev        # http://localhost:5299
 npm run build      # production build in dist/
+npm run check:viewport  # rotation, camera proportions and canvas sizing regression checks
 node --import tsx scripts/simtest.ts 30 arabia 42   # headless AI-vs-AI soak test
 ```
 

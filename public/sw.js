@@ -1,5 +1,5 @@
 // Offline support: network-first for the page, cache-first for hashed assets.
-const CACHE = 'aoak-v2-realism';
+const CACHE = 'aoak-v3-viewport';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {

@@ -221,11 +221,16 @@ export class Renderer {
   }
 
   resize() {
-    const w = this.canvas.clientWidth || window.innerWidth;
-    const h = this.canvas.clientHeight || window.innerHeight;
-    this.width = w; this.height = h;
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    // Rotation/background transitions can briefly have no usable layout.
+    if (w <= 0 || h <= 0) return;
     const dpr = window.devicePixelRatio || 1;
-    this.gl.setPixelRatio(this.quality === 'high' ? Math.min(dpr, 2) : this.quality === 'medium' ? Math.min(dpr, 1.5) : 1);
+    const pixelRatio = this.quality === 'high' ? Math.min(dpr, 2) : this.quality === 'medium' ? Math.min(dpr, 1.5) : 1;
+    if (w === this.width && h === this.height && pixelRatio === this.gl.getPixelRatio()
+      && this.canvas.width === Math.floor(w * pixelRatio) && this.canvas.height === Math.floor(h * pixelRatio)) return;
+    this.width = w; this.height = h;
+    if (pixelRatio !== this.gl.getPixelRatio()) this.gl.setPixelRatio(pixelRatio);
     this.gl.setSize(w, h, false);
     this.unitScale = Math.min(w, h) < 500 ? 1.22 : 1;
     this.updateCamera();
