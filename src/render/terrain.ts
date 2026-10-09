@@ -1,0 +1,228 @@
+// Terrain mesh, water surface, fog-of-war texture and scattered decorations.
+
+import * as THREE from 'three';
+import { Grid, T_DIRT, T_FOREST, T_GRASS, T_SAND, T_SHALLOW, T_SNOW, T_WATER } from '../sim/grid';
+import { applyFog, type FogUniforms } from './batches';
+
+const TERRAIN_COLORS: Record<number, [string, string]> = {
+  [T_GRASS]: ['#5f9c3e', '#79b04c'],
+  [T_WATER]: ['#3c5a58', '#45625e'],
+  [T_SHALLOW]: ['#b4a878', '#c2b684'],
+  [T_SAND]: ['#d6c288', '#e2d29a'],
+  [T_DIRT]: ['#9b8052', '#a98c5c'],
+  [T_FOREST]: ['#466f2c', '#557d34'],
+  [T_SNOW]: ['#e4ebee', '#f2f6f8'],
+};
+
+export const WATER_Y = -0.08;
+
+export interface Deco { t: string; x: number; y: number; v: number; rot: number; s: number }
+
+export class Terrain {
+  mesh: THREE.Mesh;
+  water: THREE.Mesh;
+  under: THREE.Mesh;
+  fogTex: THREE.DataTexture;
+  fogData: Uint8Array;
+  decos: Deco[] = [];
+  waterNormal: THREE.CanvasTexture;
+  private grid: Grid;
+
+  constructor(scene: THREE.Scene, grid: Grid, fog: FogUniforms, desert: boolean) {
+    this.grid = grid;
+    const S = grid.size;
+    // fog texture
+    this.fogData = new Uint8Array(S * S * 4);
+    this.fogTex = new THREE.DataTexture(this.fogData, S, S, THREE.RGBAFormat);
+    this.fogTex.magFilter = THREE.LinearFilter;
+    this.fogTex.minFilter = THREE.LinearFilter;
+    this.fogTex.wrapS = this.fogTex.wrapT = THREE.ClampToEdgeWrapping;
+    this.fogTex.needsUpdate = true;
+    fog.fogMap.value = this.fogTex;
+    fog.fogSize.value = S;
+
+    // ---- terrain geometry
+    const W = S + 1;
+    const pos = new Float32Array(W * W * 3);
+    const col = new Float32Array(W * W * 3);
+    const uv = new Float32Array(W * W * 2);
+    const tileCol: THREE.Color[] = [];
+    const ca = new THREE.Color(), cb = new THREE.Color();
+    let seed = 1234;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (let i = 0; i < S * S; i++) {
+      let t = grid.terrain[i];
+      if (desert && t === T_GRASS) t = T_SAND;
+      const [a, b] = TERRAIN_COLORS[t] ?? TERRAIN_COLORS[T_GRASS];
+      ca.set(a); cb.set(b);
+      const x = i % S, y = (i / S) | 0;
+      const n = 0.5 + 0.5 * Math.sin(x * 0.31 + Math.cos(y * 0.23) * 2) * Math.cos(y * 0.27 + Math.sin(x * 0.19));
+      tileCol.push(ca.clone().lerp(cb, n * 0.8 + rnd() * 0.2));
+    }
+    const c = new THREE.Color();
+    for (let y = 0; y <= S; y++) {
+      for (let x = 0; x <= S; x++) {
+        const vi = y * W + x;
+        const h = grid.height[vi];
+        pos[vi * 3] = x; pos[vi * 3 + 1] = h; pos[vi * 3 + 2] = y;
+        uv[vi * 2] = x / 3; uv[vi * 2 + 1] = y / 3;
+        c.setRGB(0, 0, 0);
+        let n = 0;
+        for (let dy = -1; dy <= 0; dy++) for (let dx = -1; dx <= 0; dx++) {
+          const tx = x + dx, ty = y + dy;
+          if (tx < 0 || ty < 0 || tx >= S || ty >= S) continue;
+          c.add(tileCol[ty * S + tx]);
+          n++;
+        }
+        c.multiplyScalar(1 / Math.max(1, n));
+        // slope / height shading
+        const hn = Math.max(0, Math.min(1, (h - 0.2) / 3));
+        c.multiplyScalar(0.95 + hn * 0.12 + (rnd() - 0.5) * 0.06);
+        if (h < 0) c.multiplyScalar(Math.max(0.45, 1 + h * 0.35));
+        col[vi * 3] = c.r; col[vi * 3 + 1] = c.g; col[vi * 3 + 2] = c.b;
+      }
+    }
+    const idx: number[] = [];
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const a = y * W + x, b = a + 1, d = a + W, e = d + 1;
+      if ((x + y) % 2) idx.push(a, d, b, b, d, e);
+      else idx.push(a, d, e, a, e, b);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const detail = makeDetailTexture();
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detail });
+    applyFog(mat, fog);
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.receiveShadow = true;
+    scene.add(this.mesh);
+
+    // ---- water
+    this.waterNormal = makeWaterNormal();
+    this.waterNormal.wrapS = this.waterNormal.wrapT = THREE.RepeatWrapping;
+    this.waterNormal.repeat.set(S / 6, S / 6);
+    const wgeo = new THREE.PlaneGeometry(S + 40, S + 40, 1, 1);
+    wgeo.rotateX(-Math.PI / 2);
+    wgeo.translate(S / 2, WATER_Y, S / 2);
+    const wmat = new THREE.MeshPhongMaterial({
+      color: '#2f7fae', specular: '#bfe4ff', shininess: 70, transparent: true, opacity: 0.8,
+      normalMap: this.waterNormal, normalScale: new THREE.Vector2(0.6, 0.6), depthWrite: false,
+    });
+    applyFog(wmat, fog);
+    this.water = new THREE.Mesh(wgeo, wmat);
+    this.water.renderOrder = 1;
+    this.water.receiveShadow = true;
+    scene.add(this.water);
+
+    // ---- underside / edges (dark)
+    const ugeo = new THREE.PlaneGeometry(S * 6, S * 6);
+    ugeo.rotateX(-Math.PI / 2);
+    ugeo.translate(S / 2, -1.6, S / 2);
+    this.under = new THREE.Mesh(ugeo, new THREE.MeshBasicMaterial({ color: '#0b0d10' }));
+    scene.add(this.under);
+
+    // ---- decorations
+    for (let i = 0; i < S * S; i++) {
+      const t = grid.terrain[i];
+      if (grid.occ[i]) continue;
+      const x = i % S, y = (i / S) | 0;
+      const r = rnd();
+      let d: string | null = null;
+      if (t === T_GRASS) d = desert ? (r < 0.015 ? 'cactus' : r < 0.04 ? 'rock' : null) : r < 0.09 ? 'grass' : r < 0.11 ? 'flower' : r < 0.118 ? 'rock' : r < 0.125 ? 'bush' : null;
+      else if (t === T_FOREST) d = r < 0.25 ? 'grass' : r < 0.3 ? 'bush' : null;
+      else if (t === T_SAND) d = r < 0.02 ? 'rock' : desert && r < 0.03 ? 'cactus' : null;
+      else if (t === T_DIRT) d = r < 0.04 ? 'rock' : r < 0.07 ? 'grass' : null;
+      else if (t === T_SHALLOW) d = r < 0.15 ? 'reed' : null;
+      if (!d) continue;
+      this.decos.push({ t: d, x: x + 0.2 + rnd() * 0.6, y: y + 0.2 + rnd() * 0.6, v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.8 + rnd() * 0.5 });
+    }
+  }
+
+  updateFog(explored: Uint8Array, visible: Uint8Array) {
+    const d = this.fogData;
+    const n = explored.length;
+    for (let i = 0; i < n; i++) {
+      const v = visible[i] ? 255 : explored[i] ? 125 : 0;
+      const k = i * 4;
+      d[k] = v; d[k + 1] = v; d[k + 2] = v; d[k + 3] = 255;
+    }
+    this.fogTex.needsUpdate = true;
+  }
+
+  animate(t: number) {
+    this.waterNormal.offset.set(t * 0.012, t * 0.007);
+  }
+
+  dispose(scene: THREE.Scene) {
+    for (const m of [this.mesh, this.water, this.under]) {
+      scene.remove(m);
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.fogTex.dispose();
+    this.waterNormal.dispose();
+  }
+}
+
+function makeDetailTexture(): THREE.CanvasTexture {
+  const N = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = N;
+  const ctx = cv.getContext('2d')!;
+  const img = ctx.createImageData(N, N);
+  let seed = 99;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const base = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) base[i] = rnd();
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let s = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += base[((y + dy + N) % N) * N + ((x + dx + N) % N)];
+    const v = 0.78 * (s / 9) + 0.22 * base[y * N + x];
+    const c = Math.round(205 + (v - 0.5) * 90);
+    const i = (y * N + x) * 4;
+    img.data[i] = c; img.data[i + 1] = c; img.data[i + 2] = c; img.data[i + 3] = 255;
+  }
+  // a few blade strokes
+  for (let k = 0; k < 500; k++) {
+    const x = Math.floor(rnd() * N), y = Math.floor(rnd() * N);
+    for (let j = 0; j < 3; j++) {
+      const i = (((y - j + N) % N) * N + x) * 4;
+      const c = rnd() < 0.5 ? 245 : 170;
+      img.data[i] = c; img.data[i + 1] = c; img.data[i + 2] = c;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function makeWaterNormal(): THREE.CanvasTexture {
+  const N = 128;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = N;
+  const ctx = cv.getContext('2d')!;
+  const img = ctx.createImageData(N, N);
+  const h = (x: number, y: number) =>
+    Math.sin((x / N) * Math.PI * 2 * 3 + Math.sin((y / N) * Math.PI * 2 * 2) * 1.5) * 0.5 +
+    Math.sin((y / N) * Math.PI * 2 * 4 + Math.cos((x / N) * Math.PI * 2 * 3)) * 0.35 +
+    Math.sin(((x + y) / N) * Math.PI * 2 * 5) * 0.15;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = h(x + 1, y) - h(x - 1, y);
+    const dy = h(x, y + 1) - h(x, y - 1);
+    const v = new THREE.Vector3(-dx, -dy, 1.2).normalize();
+    const i = (y * N + x) * 4;
+    img.data[i] = (v.x * 0.5 + 0.5) * 255;
+    img.data[i + 1] = (v.y * 0.5 + 0.5) * 255;
+    img.data[i + 2] = (v.z * 0.5 + 0.5) * 255;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return new THREE.CanvasTexture(cv);
+}

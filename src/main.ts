@@ -1,0 +1,16 @@
+import './ui/style.css';
+import { App } from './ui/app';
+import { applyAudioSettings, audioSettings, music } from './audio/sfx';
+
+if (location.hash.startsWith('#gallery')) {
+  // debug: model gallery
+  void import('./gallery').then((m) => m.runGallery(location.hash.split('=')[1] ?? ''));
+} else {
+  const app = new App();
+  Object.assign(audioSettings, { sfx: app.prefs.sfx, music: app.prefs.music, muted: app.prefs.muted });
+  applyAudioSettings();
+  app.menus.showMain();
+  music.play('menu');
+  // expose for debugging in the console
+  (window as unknown as { app: App }).app = app;
+}

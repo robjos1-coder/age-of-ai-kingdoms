@@ -1,0 +1,1218 @@
+// Procedural low-poly art: every unit, building, resource and effect in the game is built here.
+// Models face +X, origin at ground level centre.
+
+import * as THREE from 'three';
+import { MB, type Col } from './mb';
+
+export interface ModelGeo {
+  base: THREE.BufferGeometry;
+  team: THREE.BufferGeometry | null;
+  height: number;
+}
+
+const cache = new Map<string, ModelGeo>();
+
+export function getModel(key: string): ModelGeo {
+  let m = cache.get(key);
+  if (m) return m;
+  const mb = new MB();
+  buildModel(mb, key);
+  const g = mb.build();
+  const bb = g.base.boundingBox!;
+  let h = bb.max.y;
+  if (g.team?.boundingBox) h = Math.max(h, g.team.boundingBox.max.y);
+  m = { base: g.base, team: g.team, height: h };
+  cache.set(key, m);
+  return m;
+}
+
+// ---------------------------------------------------------------- palette
+const C = {
+  skin: '#e2ae86', skin2: '#b9805a', hair: '#4a3222', blond: '#caa45c', grey: '#9a9a9a',
+  linen: '#d9ccab', cloth: '#8a6a45', brown: '#6e4c2e', leather: '#6b4a2b', boot: '#3e2c1e',
+  metal: '#a8b0b8', dmetal: '#646b73', gold: '#e8b830', wood: '#8b5a2b', dwood: '#5a3a1e', plank: '#a87842',
+  straw: '#d9b862', thatch: '#c39a48', stone: '#aaa59b', dstone: '#827c72', plaster: '#ebe2cd', red: '#b6402f',
+  white: '#f2efe8', black: '#2b2b2e', leaf: '#4c8a2c', leaf2: '#3a7424', leaf3: '#5d9c34', pine: '#2f6236', pine2: '#3c7440',
+  trunk: '#6b4a2d', soil: '#6d4a2e', soil2: '#5b3d25', wheat: '#d8b851', green: '#6aa83a', sheep: '#f0ece2', deer: '#a0683a',
+  boar: '#4a3a30', wolf: '#7d7d80', horse: '#8a5a32', horse2: '#5e3d22', horse3: '#d9c9a8', camel: '#c9a36a', ele: '#8f8f8f',
+  rope: '#c7b07a', team: '#ffffff', teamD: '#cfcfcf', glow: '#ffb347', water: '#3a7ca5',
+};
+
+// ---------------------------------------------------------------- humanoids
+
+interface Pose {
+  leg: number;
+  armR: number;
+  armL: number;
+  wrist: number;
+  wristL?: number;
+  lean: number;
+  armLx?: number;
+  armRx?: number;
+  dy?: number;
+}
+
+const P_IDLE: Pose = { leg: 0, armR: 0.25, armL: -0.1, wrist: 0.9, lean: 0 };
+
+type Hand = ((mb: MB) => void) | null;
+
+interface Human {
+  skin?: Col;
+  shirt: Col;
+  shirtTeam?: boolean;
+  pants: Col;
+  boots?: Col;
+  head?: 'hair' | 'helmet' | 'hood' | 'cap' | 'kettle' | 'samurai' | 'viking' | 'turban' | 'bun' | 'nasal' | 'great' | 'feather' | 'none';
+  hair?: Col;
+  chest?: Col;
+  cape?: boolean;
+  belt?: Col;
+  skirt?: Col;
+  robe?: Col;
+  bulk?: number;
+  right?: Hand;
+  left?: Hand;
+  shield?: { col: Col; team?: boolean; shape: 'round' | 'kite' | 'tower' };
+  beard?: Col;
+  seated?: boolean;
+}
+
+function human(mb: MB, h: Human, p: Pose) {
+  const b = h.bulk ?? 1;
+  const skin = h.skin ?? C.skin;
+  mb.push(0, p.dy ?? 0, 0);
+  // legs
+  if (!h.robe) {
+    for (const s of [-1, 1]) {
+      const sw = h.seated ? 0 : p.leg * s;
+      mb.push(0, 0.27, 0.055 * s * b, h.seated ? 0.9 * s : 0, 0, h.seated ? 1.4 : sw);
+      mb.box(0.085 * b, 0.2, 0.085 * b, h.pants, 0, -0.1, 0);
+      mb.box(0.095 * b, 0.08, 0.095 * b, h.boots ?? C.boot, 0.01, -0.23, 0);
+      mb.pop();
+    }
+  }
+  mb.push(0, 0.27, 0, 0, 0, p.lean);
+  if (h.robe) {
+    mb.cyl(0.085 * b, 0.15 * b, 0.42, 7, h.robe, 0, -0.06, 0);
+  }
+  if (h.skirt) mb.cyl(0.1 * b, 0.15 * b, 0.2, 7, h.skirt, 0, -0.06, 0);
+  // torso
+  mb.box(0.15 * b, 0.21, 0.21 * b, h.shirt, 0, 0.1, 0, { team: h.shirtTeam });
+  if (h.chest) mb.box(0.16 * b, 0.13, 0.19 * b, h.chest, 0.005, 0.13, 0);
+  if (h.belt) mb.box(0.16 * b, 0.035, 0.22 * b, h.belt, 0, 0.0, 0);
+  if (h.cape) mb.box(0.03, 0.28, 0.22 * b, C.team, -0.09, 0.03, 0, { team: true, rz: -0.12 });
+  // head
+  mb.push(0, 0.29, 0);
+  mb.box(0.13, 0.13, 0.13, skin, 0, 0, 0);
+  mb.box(0.02, 0.03, 0.03, skin, 0.07, -0.01, 0); // nose
+  mb.box(0.01, 0.018, 0.018, C.black, 0.066, 0.02, 0.03);
+  mb.box(0.01, 0.018, 0.018, C.black, 0.066, 0.02, -0.03);
+  if (h.beard) mb.box(0.05, 0.06, 0.12, h.beard, 0.05, -0.05, 0);
+  switch (h.head ?? 'hair') {
+    case 'hair': mb.box(0.14, 0.05, 0.14, h.hair ?? C.hair, -0.005, 0.06, 0); mb.box(0.04, 0.09, 0.14, h.hair ?? C.hair, -0.055, 0.02, 0); break;
+    case 'bun': mb.box(0.14, 0.05, 0.14, h.hair ?? C.hair, -0.005, 0.06, 0); mb.box(0.05, 0.12, 0.145, h.hair ?? C.hair, -0.05, 0.0, 0); mb.ball(0.045, h.hair ?? C.hair, -0.08, 0.06, 0); break;
+    case 'cap': mb.box(0.15, 0.05, 0.15, C.team, 0, 0.07, 0, { team: true }); mb.box(0.05, 0.015, 0.12, C.team, 0.08, 0.05, 0, { team: true }); break;
+    case 'hood': mb.box(0.16, 0.16, 0.16, h.robe ?? C.brown, -0.01, 0.02, 0); mb.box(0.02, 0.1, 0.1, '#3a2a1c', 0.07, -0.01, 0); break;
+    case 'helmet': mb.cyl(0.06, 0.085, 0.08, 7, C.metal, 0, 0.07, 0); mb.box(0.02, 0.07, 0.02, C.metal, 0.07, 0.0, 0); break;
+    case 'nasal': mb.cone(0.09, 0.12, 6, C.metal, 0, 0.1, 0); mb.box(0.02, 0.07, 0.02, C.dmetal, 0.075, 0.0, 0); break;
+    case 'kettle': mb.cyl(0.07, 0.08, 0.06, 8, C.dmetal, 0, 0.07, 0); mb.cyl(0.13, 0.13, 0.015, 10, C.dmetal, 0, 0.04, 0); break;
+    case 'great': mb.box(0.15, 0.17, 0.15, C.metal, 0, 0.01, 0); mb.box(0.01, 0.02, 0.1, C.black, 0.076, 0.02, 0); mb.box(0.03, 0.08, 0.03, C.team, 0, 0.12, 0, { team: true }); break;
+    case 'feather': mb.cyl(0.06, 0.085, 0.08, 7, C.metal, 0, 0.07, 0); mb.box(0.12, 0.03, 0.03, C.team, -0.06, 0.12, 0, { team: true, rz: 0.4 }); break;
+    case 'samurai': mb.cyl(0.07, 0.09, 0.07, 6, '#3a2a2a', 0, 0.07, 0); mb.box(0.02, 0.1, 0.16, '#b8902a', 0.02, 0.12, 0, { rz: -0.2 }); break;
+    case 'viking': mb.cyl(0.07, 0.085, 0.07, 7, C.dmetal, 0, 0.07, 0); mb.cone(0.02, 0.08, 4, C.white, 0, 0.11, 0.08, { rx: -0.8 }); mb.cone(0.02, 0.08, 4, C.white, 0, 0.11, -0.08, { rx: 0.8 }); break;
+    case 'turban': mb.ball(0.1, C.white, -0.01, 0.07, 0, {}, 0.6); mb.box(0.03, 0.03, 0.03, C.team, 0.07, 0.07, 0, { team: true }); break;
+    case 'none': break;
+  }
+  mb.pop();
+  // arms
+  const arm = (side: number, ang: number, wrist: number, hand: Hand, rx: number) => {
+    mb.push(0, 0.18, 0.135 * side * b, rx * side, 0, ang);
+    mb.box(0.065, 0.2, 0.065, h.chest && !h.robe ? h.chest : h.robe ?? h.shirt, 0, -0.08, 0, { team: h.shirtTeam && !h.chest && !h.robe });
+    mb.box(0.06, 0.05, 0.06, skin, 0, -0.2, 0);
+    if (hand) {
+      mb.push(0, -0.2, 0, 0, 0, wrist);
+      hand(mb);
+      mb.pop();
+    }
+    mb.pop();
+  };
+  arm(1, p.armR, p.wrist, h.right ?? null, p.armRx ?? 0);
+  let left = h.left ?? null;
+  if (h.shield) {
+    const s = h.shield;
+    left = (m) => {
+      if (s.shape === 'round') m.cyl(0.13, 0.13, 0.03, 9, s.col, 0.02, 0.02, 0.04, { rx: Math.PI / 2, team: s.team });
+      else if (s.shape === 'kite') { m.box(0.22, 0.17, 0.03, s.col, 0.02, 0.03, 0.04, { team: s.team, ry: Math.PI / 2 }); m.cone(0.09, 0.1, 4, s.col, 0.02, -0.1, 0.04, { team: s.team, rx: Math.PI }); }
+      else m.box(0.28, 0.2, 0.03, s.col, 0.02, 0.02, 0.04, { team: s.team, ry: Math.PI / 2 });
+      m.box(0.03, 0.03, 0.01, C.gold, 0.02, 0.03, 0.06);
+    };
+  }
+  arm(-1, p.armL, p.wristL ?? 0, left, p.armLx ?? 0);
+  mb.pop();
+  mb.pop();
+}
+
+// hand items (hand at origin, forward = +X when wrist = 0 and arm hanging)
+const sword = (len = 0.3, col: Col = C.metal): Hand => (m) => {
+  m.box(0.03, 0.03, 0.09, C.gold, 0.02, 0, 0);
+  m.box(len, 0.028, 0.012, col, 0.03 + len / 2, 0, 0);
+  m.box(0.05, 0.02, 0.02, C.leather, -0.02, 0, 0);
+};
+const bigSword: Hand = (m) => { m.box(0.03, 0.03, 0.12, C.gold, 0.02, 0, 0); m.box(0.48, 0.035, 0.014, C.metal, 0.27, 0, 0); m.box(0.08, 0.025, 0.025, C.leather, -0.03, 0, 0); };
+const katana: Hand = (m) => { m.box(0.02, 0.04, 0.04, C.gold, 0.02, 0, 0); m.box(0.36, 0.02, 0.01, C.white, 0.2, 0.01, 0, { rz: 0.05 }); m.box(0.08, 0.02, 0.02, C.black, -0.03, 0, 0); };
+const spear = (len = 0.75, tip: Col = C.metal): Hand => (m) => {
+  m.box(len, 0.022, 0.022, C.wood, len * 0.25, 0, 0);
+  m.cone(0.025, 0.08, 4, tip, len * 0.75 + 0.04, 0, 0, { rz: -Math.PI / 2 });
+};
+const halberd: Hand = (m) => { spear(0.8)!(m); m.box(0.06, 0.09, 0.012, C.metal, 0.56, 0.04, 0); };
+const axe = (col: Col = C.metal): Hand => (m) => { m.box(0.3, 0.025, 0.025, C.wood, 0.1, 0, 0); m.box(0.06, 0.09, 0.015, col, 0.23, 0.04, 0); };
+const throwingAxe: Hand = (m) => { m.box(0.16, 0.02, 0.02, C.wood, 0.06, 0, 0); m.box(0.05, 0.07, 0.012, C.metal, 0.13, 0.03, 0); };
+const pick: Hand = (m) => { m.box(0.3, 0.025, 0.025, C.wood, 0.1, 0, 0); m.box(0.025, 0.2, 0.02, C.dmetal, 0.24, 0, 0, { rz: 0.15 }); };
+const hammer: Hand = (m) => { m.box(0.22, 0.022, 0.022, C.wood, 0.07, 0, 0); m.box(0.05, 0.1, 0.05, C.dmetal, 0.18, 0, 0); };
+const hoe: Hand = (m) => { m.box(0.38, 0.022, 0.022, C.wood, 0.12, 0, 0); m.box(0.025, 0.08, 0.05, C.dmetal, 0.3, -0.03, 0); };
+const knife: Hand = (m) => { m.box(0.1, 0.02, 0.012, C.metal, 0.06, 0, 0); m.box(0.05, 0.025, 0.02, C.leather, -0.01, 0, 0); };
+const basket: Hand = (m) => { m.cyl(0.07, 0.05, 0.07, 7, C.straw, 0.02, 0.02, 0.06); };
+const rod: Hand = (m) => { m.box(0.5, 0.015, 0.015, C.wood, 0.2, 0, 0); };
+const bow = (big = false): Hand => (m) => {
+  const L = big ? 0.5 : 0.38;
+  m.box(L, 0.02, 0.02, C.dwood, 0, 0.0, 0.02);
+  m.box(0.06, 0.02, 0.02, C.dwood, L / 2 - 0.02, -0.03, 0.02, { rz: 0.6 });
+  m.box(0.06, 0.02, 0.02, C.dwood, -L / 2 + 0.02, -0.03, 0.02, { rz: -0.6 });
+  m.box(L, 0.006, 0.006, C.linen, 0, -0.05, 0.02);
+};
+const crossbow: Hand = (m) => { m.box(0.24, 0.035, 0.035, C.wood, 0.1, 0, 0); m.box(0.03, 0.02, 0.26, C.dwood, 0.2, 0.01, 0); };
+const gun: Hand = (m) => { m.box(0.42, 0.03, 0.03, C.dmetal, 0.15, 0, 0); m.box(0.14, 0.04, 0.035, C.wood, -0.05, -0.01, 0); };
+const relicHand: Hand = (m) => { m.box(0.1, 0.08, 0.08, C.gold, 0.06, 0.02, -0.06); };
+const staff: Hand = (m) => { m.box(0.6, 0.022, 0.022, C.wood, 0.15, 0, 0); };
+
+function poseFor(pose: string, style: 'melee' | 'spear' | 'bow' | 'xbow' | 'gun' | 'tool' | 'throw' | 'monk' | 'none'): Pose {
+  const p: Pose = { ...P_IDLE };
+  const walk = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
+  if (walk) { p.leg = 0.5 * walk; p.armL = -0.35 * walk; p.armR = 0.25 + 0.3 * walk; p.dy = 0.01; }
+  switch (style) {
+    case 'melee':
+      if (pose === 'atk1') { p.armR = 2.6; p.wrist = 0.6; p.lean = -0.1; p.armL = 0.6; }
+      if (pose === 'atk2') { p.armR = 0.7; p.wrist = -0.5; p.lean = 0.2; p.armL = 0.4; p.leg = 0.3; }
+      if (pose === 'idle' || walk) { p.armL = 0.5; p.wrist = 1.0; }
+      break;
+    case 'spear':
+      p.wrist = 1.25; p.armL = 0.4;
+      if (pose === 'atk1') { p.armR = 1.0; p.wrist = -0.6; p.lean = -0.15; }
+      if (pose === 'atk2') { p.armR = 1.5; p.wrist = -1.4; p.lean = 0.25; p.leg = 0.35; }
+      break;
+    case 'bow':
+      p.armR = -0.2; p.wrist = 0; p.armL = 0.2; p.wristL = -1.5;
+      if (pose === 'atk1' || pose === 'atk2') { p.armL = Math.PI / 2; p.wristL = 0; p.armR = Math.PI / 2 - 0.1; p.armRx = 0.6; p.lean = 0.05; }
+      if (pose === 'atk2') { p.armR = Math.PI / 2 + 0.3; p.armRx = 0.1; }
+      break;
+    case 'xbow':
+    case 'gun':
+      p.armR = 0.4; p.wrist = 0.6; p.armL = 0.6;
+      if (pose === 'atk1' || pose === 'atk2') { p.armR = 1.4; p.wrist = 0.15; p.armL = 1.4; p.armLx = -0.5; }
+      if (pose === 'atk2') p.lean = -0.1;
+      break;
+    case 'throw':
+      if (pose === 'atk1') { p.armR = 2.8; p.wrist = 0.3; p.lean = -0.15; }
+      if (pose === 'atk2') { p.armR = 1.2; p.wrist = -0.4; p.lean = 0.2; p.leg = 0.3; }
+      break;
+    case 'tool':
+      if (pose === 'work1' || pose === 'atk1') { p.armR = 2.4; p.armL = 2.2; p.wrist = 0.7; p.lean = -0.05; }
+      if (pose === 'work2' || pose === 'atk2') { p.armR = 0.6; p.armL = 0.5; p.wrist = -0.2; p.lean = 0.25; }
+      break;
+    case 'monk':
+      p.armR = 0.3; p.wrist = 1.4; p.armL = 0.3;
+      if (pose === 'work1' || pose === 'work2') { p.armR = 2.4; p.armL = 2.4; p.armRx = 0.3; p.armLx = 0.3; p.wrist = 1.6; }
+      if (pose === 'work2') { p.armRx = 0.6; p.armLx = 0.6; }
+      break;
+    case 'none': break;
+  }
+  return p;
+}
+
+// ---------------------------------------------------------------- unit models
+
+function deadWrap(mb: MB, pose: string, f: () => void, lieH = 0.08) {
+  if (pose === 'dead') { mb.push(0, lieH, 0, Math.PI / 2, 0, 0); f(); mb.pop(); }
+  else f();
+}
+
+function villager(mb: MB, pose: string, variant: string) {
+  // variant: "<gk>|<carry>|<f|m>"
+  const [gk, carry, sex] = variant.split('|');
+  const fem = sex === 'f';
+  const tool: Hand = gk === 'wood' ? axe() : gk === 'gold' || gk === 'stone' ? pick : gk === 'farm' ? hoe : gk === 'forage' ? basket : gk === 'hunt' || gk === 'sheep' ? knife : gk === 'fish' ? rod : gk === 'build' ? hammer : null;
+  let style: 'tool' | 'none' | 'throw' = gk && gk !== 'none' && gk !== 'forage' ? 'tool' : 'none';
+  if ((gk === 'hunt') && (pose === 'atk1' || pose === 'atk2')) style = 'throw';
+  const p = poseFor(pose, style);
+  if (gk === 'forage' && (pose === 'work1' || pose === 'work2')) { p.armR = 1.2 + (pose === 'work2' ? 0.4 : 0); p.armL = 1.0; p.lean = 0.35; }
+  if (gk === 'farm' && (pose === 'work1' || pose === 'work2')) { p.armR = pose === 'work1' ? 1.6 : 0.6; p.armL = p.armR - 0.2; p.wrist = pose === 'work1' ? 0.2 : -0.3; p.lean = 0.2; }
+  if (carry && carry !== 'none' && (pose === 'idle' || pose.startsWith('walk'))) { p.armL = 2.6; p.armLx = 0.3; }
+  human(mb, {
+    shirt: fem ? '#b9875a' : C.linen, shirtTeam: false, pants: fem ? '#7b5a3c' : C.brown, belt: C.team,
+    head: fem ? 'bun' : (gk === 'farm' ? 'cap' : 'hair'), hair: fem ? '#7a4a28' : C.hair, skirt: fem ? '#8c6844' : undefined,
+    right: tool,
+  }, p);
+  // team sash
+  mb.box(0.155, 0.04, 0.215, C.team, 0, 0.47 + (p.dy ?? 0), 0, { team: true });
+  if (carry && carry !== 'none') {
+    const y = 0.6 + (p.dy ?? 0);
+    if (carry === 'wood') { mb.cyl(0.035, 0.035, 0.32, 6, C.trunk, -0.02, y, -0.1, { rx: Math.PI / 2 }); mb.cyl(0.03, 0.03, 0.3, 6, '#7b5636', 0.02, y + 0.05, -0.1, { rx: Math.PI / 2 }); }
+    else if (carry === 'gold') mb.ball(0.08, C.gold, -0.02, y, -0.1);
+    else if (carry === 'stone') mb.ball(0.08, C.stone, -0.02, y, -0.1);
+    else mb.cyl(0.07, 0.055, 0.08, 7, C.straw, -0.02, y, -0.1);
+  }
+}
+
+function infantry(mb: MB, t: string, pose: string) {
+  const s = (style: Parameters<typeof poseFor>[1]) => poseFor(pose, style);
+  switch (t) {
+    case 'militia': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', right: sword(0.26), belt: C.leather }, s('melee'));
+    case 'man_at_arms': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', chest: '#8d7a5e', right: sword(0.3), shield: { col: C.team, team: true, shape: 'round' }, belt: C.leather }, s('melee'));
+    case 'long_swordsman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.metal, right: sword(0.36), shield: { col: C.team, team: true, shape: 'kite' }, belt: C.leather }, s('melee'));
+    case 'two_handed_swordsman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.metal, right: bigSword, cape: true, belt: C.leather }, s('melee'));
+    case 'champion': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: '#c9ced4', right: bigSword, cape: true, bulk: 1.1, belt: C.gold }, s('melee'));
+    case 'spearman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'cap', right: spear(0.7), belt: C.leather }, s('spear'));
+    case 'pikeman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'kettle', chest: '#8d7a5e', right: spear(0.95), belt: C.leather }, s('spear'));
+    case 'halberdier': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'kettle', chest: C.metal, right: halberd, belt: C.leather }, s('spear'));
+    case 'archer': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hood', robe: undefined, left: bow(), belt: C.leather }, s('bow'));
+    case 'crossbowman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'kettle', chest: '#8d7a5e', right: crossbow, belt: C.leather }, s('xbow'));
+    case 'arbalester': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'kettle', chest: C.metal, right: crossbow, cape: true, belt: C.leather }, s('xbow'));
+    case 'skirmisher': return human(mb, { shirt: '#9b8a62', pants: C.brown, head: 'cap', right: spear(0.4), shield: { col: C.team, team: true, shape: 'round' } }, s('throw'));
+    case 'elite_skirmisher': return human(mb, { shirt: '#9b8a62', pants: C.brown, head: 'helmet', right: spear(0.45), shield: { col: C.team, team: true, shape: 'kite' }, chest: '#8d7a5e' }, s('throw'));
+    case 'hand_cannoneer': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'feather', right: gun, belt: C.leather }, s('gun'));
+    case 'longbowman': return human(mb, { shirt: '#3d6b35', pants: C.brown, head: 'feather', left: bow(true), cape: true, belt: C.leather }, s('bow'));
+    case 'throwing_axeman': return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', hair: C.blond, beard: C.blond, right: throwingAxe, shield: { col: C.team, team: true, shape: 'round' } }, s('throw'));
+    case 'teutonic_knight': return human(mb, { shirt: C.white, pants: C.dmetal, head: 'great', chest: C.metal, right: bigSword, cape: true, bulk: 1.15, belt: C.black }, s('melee'));
+    case 'samurai': return human(mb, { shirt: C.team, shirtTeam: true, pants: '#2f2f3a', head: 'samurai', chest: '#7a2b25', right: katana, belt: C.gold }, s('melee'));
+    case 'berserk': return human(mb, { shirt: '#7e6a4a', pants: C.brown, head: 'viking', beard: C.blond, right: axe(), shield: { col: C.team, team: true, shape: 'round' }, bulk: 1.08 }, s('melee'));
+    case 'chu_ko_nu': return human(mb, { shirt: C.team, shirtTeam: true, pants: '#2f2f3a', head: 'kettle', right: crossbow, chest: '#8a3a2a' }, s('xbow'));
+    case 'monk': return human(mb, { shirt: '#8a6a45', pants: C.brown, head: 'hood', robe: '#8a6a45', right: staff, left: null, belt: C.team }, s('monk'));
+  }
+  return human(mb, { shirt: C.team, shirtTeam: true, pants: C.brown, right: sword() }, s('melee'));
+}
+
+function horse(mb: MB, pose: string, col: Col, opts: { barding?: boolean; camel?: boolean; armor?: Col } = {}) {
+  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
+  const camel = !!opts.camel;
+  const legL = camel ? 0.42 : 0.32;
+  const bodyY = legL + 0.1;
+  for (const [x, z, ph] of [[0.2, 0.08, 1], [0.2, -0.08, -1], [-0.22, 0.08, -1], [-0.22, -0.08, 1]] as const) {
+    mb.push(x, bodyY - 0.05, z, 0, 0, 0.5 * g * ph);
+    mb.box(0.07, legL, 0.07, col, 0, -legL / 2, 0);
+    mb.box(0.075, 0.05, 0.075, C.black, 0, -legL + 0.02, 0);
+    mb.pop();
+  }
+  mb.box(0.62, 0.22, 0.2, col, 0, bodyY + 0.05, 0);
+  if (camel) mb.ball(0.13, col, -0.02, bodyY + 0.2, 0, {}, 0.8);
+  // neck & head
+  mb.box(0.12, camel ? 0.4 : 0.3, 0.11, col, 0.33, bodyY + (camel ? 0.25 : 0.2), 0, { rz: camel ? -0.25 : -0.5 });
+  mb.box(camel ? 0.22 : 0.24, 0.1, 0.1, col, camel ? 0.47 : 0.46, bodyY + (camel ? 0.45 : 0.33), 0, { rz: 0.35 });
+  mb.box(0.03, 0.06, 0.03, col, 0.38, bodyY + 0.42, 0.04);
+  mb.box(0.03, 0.06, 0.03, col, 0.38, bodyY + 0.42, -0.04);
+  if (!camel) mb.box(0.18, 0.12, 0.02, opts.barding ? C.team : C.horse2, 0.26, bodyY + 0.26, 0, { rz: -0.5, team: !!opts.barding });
+  // tail
+  mb.box(0.04, 0.22, 0.05, camel ? col : C.horse2, -0.33, bodyY - 0.02, 0, { rz: 0.4 + 0.15 * g });
+  if (opts.barding) {
+    mb.box(0.66, 0.16, 0.23, C.team, 0, bodyY + 0.0, 0, { team: true });
+    if (opts.armor) mb.box(0.24, 0.14, 0.12, opts.armor, 0.42, bodyY + 0.34, 0, { rz: 0.35 });
+  } else {
+    mb.box(0.18, 0.06, 0.22, C.team, -0.02, bodyY + 0.16, 0, { team: true });
+  }
+  return bodyY + 0.16;
+}
+
+function cavalry(mb: MB, t: string, pose: string) {
+  const riderPose = (style: Parameters<typeof poseFor>[1]) => {
+    const p = poseFor(pose === 'walk1' || pose === 'walk2' ? 'idle' : pose, style);
+    p.leg = 0;
+    return p;
+  };
+  let saddle = 0;
+  const ride = (h: Human, style: Parameters<typeof poseFor>[1]) => {
+    mb.push(-0.02, saddle - 0.25, 0);
+    human(mb, { ...h, seated: true }, riderPose(style));
+    mb.pop();
+  };
+  switch (t) {
+    case 'scout_cavalry':
+      saddle = horse(mb, pose, C.horse);
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'hair', right: sword(0.24) }, 'melee');
+    case 'light_cavalry':
+      saddle = horse(mb, pose, C.horse3);
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', right: sword(0.28), shield: { col: C.team, team: true, shape: 'round' } }, 'melee');
+    case 'hussar':
+      saddle = horse(mb, pose, C.horse3);
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'feather', right: sword(0.32), cape: true }, 'melee');
+    case 'knight':
+      saddle = horse(mb, pose, C.horse2, { barding: true });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: C.metal, right: sword(0.32), shield: { col: C.team, team: true, shape: 'kite' } }, 'melee');
+    case 'cavalier':
+      saddle = horse(mb, pose, '#3a2a1e', { barding: true, armor: C.metal });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: C.metal, right: spear(0.8), shield: { col: C.team, team: true, shape: 'kite' } }, 'spear');
+    case 'paladin':
+      saddle = horse(mb, pose, '#e8e2d6', { barding: true, armor: C.gold });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'great', chest: '#d8dde3', right: spear(0.85, C.gold), cape: true, shield: { col: C.team, team: true, shape: 'kite' } }, 'spear');
+    case 'cataphract':
+      saddle = horse(mb, pose, '#4a3426', { barding: true, armor: C.gold });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.dmetal, head: 'nasal', chest: C.gold, right: spear(0.8), cape: true }, 'spear');
+    case 'cavalry_archer': case 'mangudai':
+      saddle = horse(mb, pose, t === 'mangudai' ? '#7b5a3a' : C.horse);
+      return ride({ shirt: t === 'mangudai' ? '#6a4a2e' : C.team, shirtTeam: t !== 'mangudai', pants: C.brown, head: t === 'mangudai' ? 'kettle' : 'hood', left: bow() }, 'bow');
+    case 'heavy_cavalry_archer':
+      saddle = horse(mb, pose, C.horse2, { barding: true });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.brown, head: 'helmet', chest: C.metal, left: bow() }, 'bow');
+    case 'camel_rider': case 'heavy_camel_rider':
+      saddle = horse(mb, pose, C.camel, { camel: true });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: sword(0.3), shield: t === 'heavy_camel_rider' ? { col: C.team, team: true, shape: 'round' } : undefined }, 'melee');
+    case 'mameluke':
+      saddle = horse(mb, pose, C.camel, { camel: true });
+      return ride({ shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: katana, cape: true }, 'throw');
+  }
+}
+
+function elephant(mb: MB, pose: string) {
+  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
+  for (const [x, z, ph] of [[0.32, 0.18, 1], [0.32, -0.18, -1], [-0.32, 0.18, -1], [-0.32, -0.18, 1]] as const) {
+    mb.push(x, 0.45, z, 0, 0, 0.3 * g * ph);
+    mb.cyl(0.1, 0.11, 0.45, 7, C.ele, 0, -0.22, 0);
+    mb.pop();
+  }
+  mb.box(1.0, 0.55, 0.62, C.ele, 0, 0.72, 0);
+  mb.box(0.3, 0.4, 0.42, C.ele, 0.6, 0.86, 0);
+  mb.box(0.04, 0.32, 0.26, '#7c7c7c', 0.5, 0.88, 0.28, { ry: 0.4 });
+  mb.box(0.04, 0.32, 0.26, '#7c7c7c', 0.5, 0.88, -0.28, { ry: -0.4 });
+  const tr = pose === 'atk2' ? -0.9 : pose === 'atk1' ? 0.6 : 0.1;
+  mb.push(0.76, 0.75, 0, 0, 0, tr);
+  mb.box(0.1, 0.45, 0.1, C.ele, 0.02, -0.2, 0);
+  mb.pop();
+  mb.cone(0.035, 0.28, 5, C.white, 0.82, 0.68, 0.12, { rz: -1.9 });
+  mb.cone(0.035, 0.28, 5, C.white, 0.82, 0.68, -0.12, { rz: -1.9 });
+  // howdah
+  mb.box(0.62, 0.08, 0.7, C.team, -0.05, 1.03, 0, { team: true });
+  mb.box(0.5, 0.25, 0.5, C.dwood, -0.05, 1.18, 0);
+  mb.pyramid(0.6, 0.6, 0.25, C.gold, -0.05, 1.32, 0);
+  mb.push(-0.05, 1.07, 0);
+  human(mb, { shirt: C.team, shirtTeam: true, pants: C.linen, head: 'turban', right: spear(0.7) }, poseFor(pose.startsWith('walk') ? 'idle' : pose, 'spear'));
+  mb.pop();
+}
+
+function animal(mb: MB, t: string, pose: string) {
+  const g = pose === 'walk1' ? 1 : pose === 'walk2' ? -1 : 0;
+  const legs = (len: number, col: Col, fx: number, bx: number, z: number, w = 0.05) => {
+    for (const [x, zz, ph] of [[fx, z, 1], [fx, -z, -1], [bx, z, -1], [bx, -z, 1]] as const) {
+      mb.push(x, len, zz, 0, 0, 0.5 * g * ph);
+      mb.box(w, len, w, col, 0, -len / 2, 0);
+      mb.pop();
+    }
+  };
+  switch (t) {
+    case 'sheep':
+      legs(0.14, C.black, 0.1, -0.1, 0.06, 0.04);
+      mb.ball(0.17, C.sheep, 0, 0.25, 0, {}, 0.75, 1);
+      mb.box(0.12, 0.1, 0.09, '#3a3533', 0.18, 0.3, 0);
+      mb.box(0.03, 0.03, 0.06, '#3a3533', 0.15, 0.34, 0.06, { rx: 0.5 });
+      mb.box(0.03, 0.03, 0.06, '#3a3533', 0.15, 0.34, -0.06, { rx: -0.5 });
+      break;
+    case 'deer':
+      legs(0.3, C.deer, 0.17, -0.17, 0.06, 0.04);
+      mb.box(0.46, 0.16, 0.15, C.deer, 0, 0.36, 0);
+      mb.box(0.08, 0.24, 0.08, C.deer, 0.24, 0.5, 0, { rz: -0.4 });
+      mb.box(0.16, 0.08, 0.08, C.deer, 0.32, 0.6, 0);
+      mb.box(0.1, 0.06, 0.12, '#f1e8d8', -0.22, 0.38, 0);
+      for (const s of [-1, 1]) { mb.box(0.02, 0.16, 0.02, '#e8dcc0', 0.28, 0.72, 0.04 * s, { rx: 0.4 * s }); mb.box(0.08, 0.02, 0.02, '#e8dcc0', 0.3, 0.75, 0.07 * s); }
+      break;
+    case 'boar':
+      legs(0.14, C.boar, 0.14, -0.14, 0.07);
+      mb.box(0.46, 0.22, 0.2, C.boar, 0, 0.25, 0);
+      mb.box(0.3, 0.06, 0.06, '#2b211b', -0.02, 0.38, 0);
+      mb.box(0.16, 0.14, 0.14, C.boar, 0.28, 0.24, 0);
+      mb.box(0.05, 0.06, 0.08, '#c08b80', 0.37, 0.22, 0);
+      mb.cone(0.015, 0.07, 4, C.white, 0.34, 0.2, 0.06, { rz: -0.6 });
+      mb.cone(0.015, 0.07, 4, C.white, 0.34, 0.2, -0.06, { rz: -0.6 });
+      break;
+    case 'wolf':
+      legs(0.2, C.wolf, 0.15, -0.15, 0.05, 0.045);
+      mb.box(0.42, 0.15, 0.14, C.wolf, 0, 0.3, 0);
+      mb.box(0.14, 0.13, 0.12, C.wolf, 0.25, 0.36, 0);
+      mb.box(0.1, 0.06, 0.07, '#5d5d60', 0.35, 0.33, 0);
+      mb.cone(0.03, 0.07, 4, C.wolf, 0.23, 0.46, 0.04);
+      mb.cone(0.03, 0.07, 4, C.wolf, 0.23, 0.46, -0.04);
+      mb.box(0.2, 0.05, 0.05, C.wolf, -0.27, 0.3, 0, { rz: -0.5 });
+      break;
+  }
+}
+
+function wheels(mb: MB, xs: number[], z: number, r: number) {
+  for (const x of xs) for (const s of [-1, 1]) {
+    mb.cyl(r, r, 0.05, 8, C.dwood, x, r, z * s, { rx: Math.PI / 2 });
+    mb.cyl(r * 0.3, r * 0.3, 0.07, 6, C.dmetal, x, r, z * s, { rx: Math.PI / 2 });
+  }
+}
+
+function siege(mb: MB, t: string, pose: string, variant: string) {
+  switch (t) {
+    case 'battering_ram': case 'capped_ram': {
+      wheels(mb, [-0.3, 0.3], 0.3, 0.12);
+      mb.boxB(0.9, 0.12, 0.5, C.dwood, 0, 0.12, 0);
+      mb.gable(0.95, 0.66, 0.42, t === 'capped_ram' ? C.dmetal : C.wood, 0, 0.42, 0);
+      mb.box(0.92, 0.32, 0.04, C.plank, 0, 0.36, 0.3);
+      mb.box(0.92, 0.32, 0.04, C.plank, 0, 0.36, -0.3);
+      const off = pose === 'atk1' ? -0.15 : pose === 'atk2' ? 0.18 : 0;
+      mb.cyl(0.07, 0.07, 1.0, 7, C.trunk, 0.15 + off, 0.36, 0, { rz: Math.PI / 2 });
+      mb.cyl(0.1, 0.1, 0.12, 7, C.dmetal, 0.66 + off, 0.36, 0, { rz: Math.PI / 2 });
+      mb.box(0.3, 0.06, 0.52, C.team, -0.2, 0.66, 0, { team: true });
+      break;
+    }
+    case 'mangonel': case 'onager': {
+      wheels(mb, [-0.28, 0.28], 0.26, 0.1);
+      mb.boxB(0.8, 0.1, 0.42, C.dwood, 0, 0.12, 0);
+      mb.boxB(0.08, 0.38, 0.08, C.wood, 0.1, 0.2, 0.17);
+      mb.boxB(0.08, 0.38, 0.08, C.wood, 0.1, 0.2, -0.17);
+      mb.box(0.1, 0.06, 0.42, C.wood, 0.1, 0.56, 0);
+      const ang = pose === 'atk2' ? 1.3 : 0.2;
+      mb.push(-0.05, 0.28, 0, 0, 0, ang);
+      mb.box(0.75, 0.05, 0.05, C.wood, -0.35, 0, 0);
+      mb.cyl(0.09, 0.07, 0.07, 7, C.dwood, -0.72, 0.03, 0);
+      if (pose !== 'atk2') mb.ball(0.06, C.dstone, -0.72, 0.08, 0);
+      mb.pop();
+      mb.box(0.2, 0.05, 0.44, C.team, -0.28, 0.2, 0, { team: true });
+      if (t === 'onager') mb.box(0.82, 0.04, 0.04, C.dmetal, 0, 0.2, 0.22);
+      break;
+    }
+    case 'scorpion': case 'heavy_scorpion': {
+      mb.boxB(0.06, 0.32, 0.06, C.wood, -0.1, 0, 0.15, { rx: -0.3 });
+      mb.boxB(0.06, 0.32, 0.06, C.wood, -0.1, 0, -0.15, { rx: 0.3 });
+      mb.boxB(0.06, 0.32, 0.06, C.wood, 0.15, 0, 0, { rz: 0.3 });
+      mb.box(0.7, 0.07, 0.1, C.wood, 0.05, 0.36, 0);
+      mb.box(0.06, 0.06, 0.6, t === 'heavy_scorpion' ? C.dmetal : C.dwood, 0.25, 0.38, 0);
+      if (pose !== 'atk2') mb.box(0.5, 0.025, 0.025, C.metal, 0.15, 0.42, 0);
+      mb.box(0.2, 0.08, 0.14, C.team, -0.15, 0.36, 0, { team: true });
+      break;
+    }
+    case 'trebuchet': {
+      if (variant === 'packed') {
+        wheels(mb, [-0.45, 0.45], 0.3, 0.14);
+        mb.boxB(1.3, 0.12, 0.5, C.dwood, 0, 0.14, 0);
+        mb.box(1.5, 0.08, 0.08, C.wood, 0.05, 0.36, 0);
+        mb.box(0.4, 0.25, 0.4, C.dstone, -0.4, 0.4, 0);
+        mb.box(0.3, 0.08, 0.52, C.team, 0.3, 0.3, 0, { team: true });
+      } else {
+        mb.boxB(1.4, 0.12, 0.9, C.dwood, 0, 0, 0);
+        for (const s of [-1, 1]) {
+          mb.boxB(0.08, 1.2, 0.08, C.wood, -0.25, 0.1, 0.35 * s, { rz: -0.15 });
+          mb.boxB(0.08, 1.2, 0.08, C.wood, 0.25, 0.1, 0.35 * s, { rz: 0.15 });
+        }
+        mb.box(0.1, 0.1, 0.8, C.wood, 0, 1.25, 0);
+        const ang = pose === 'atk2' ? -1.0 : pose === 'atk1' ? 0.75 : 0.75;
+        mb.push(0, 1.25, 0, 0, 0, ang);
+        mb.box(2.0, 0.07, 0.07, C.wood, -0.45, 0, 0);
+        mb.box(0.36, 0.36, 0.36, C.dstone, 0.5, -0.25, 0);
+        mb.box(0.36, 0.06, 0.38, C.team, 0.5, -0.04, 0, { team: true });
+        mb.pop();
+      }
+      break;
+    }
+    case 'bombard_cannon': {
+      wheels(mb, [0], 0.24, 0.17);
+      mb.box(0.7, 0.06, 0.16, C.dwood, -0.15, 0.14, 0, { rz: 0.15 });
+      const kick = pose === 'atk2' ? -0.08 : 0;
+      mb.cyl(0.08, 0.1, 0.8, 8, '#4a4f55', 0.15 + kick, 0.3, 0, { rz: Math.PI / 2 - 0.08 });
+      mb.cyl(0.11, 0.11, 0.06, 8, C.gold, 0.53 + kick, 0.33, 0, { rz: Math.PI / 2 });
+      mb.box(0.14, 0.06, 0.18, C.team, -0.3, 0.2, 0, { team: true });
+      break;
+    }
+  }
+}
+
+function hullGeo(L: number, W: number, h: number, taper: number): THREE.BufferGeometry {
+  const sh = new THREE.Shape();
+  const w = (W / 2) * taper;
+  sh.moveTo(-L / 2, -w * 0.8);
+  sh.quadraticCurveTo(-L / 2 - 0.06, 0, -L / 2, w * 0.8);
+  sh.lineTo(L * 0.12, w);
+  sh.quadraticCurveTo(L * 0.4, w * 0.85, L / 2, 0);
+  sh.quadraticCurveTo(L * 0.4, -w * 0.85, L * 0.12, -w);
+  sh.lineTo(-L / 2, -w * 0.8);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 4 });
+  g.rotateX(-Math.PI / 2);
+  return g;
+}
+
+function ship(mb: MB, t: string, pose: string) {
+  const L = t === 'fishing_ship' ? 1.0 : t === 'transport_ship' ? 1.3 : t === 'galleon' || t === 'cannon_galleon' ? 1.6 : 1.4;
+  const W = t === 'transport_ship' ? 0.62 : t === 'fishing_ship' ? 0.42 : 0.5;
+  const hullC = t === 'galleon' || t === 'cannon_galleon' ? '#5a3a22' : C.wood;
+  // hull: narrow keel, wider upper hull, deck, rails
+  mb.add(hullGeo(L * 0.9, W, 0.14, 0.62), C.dwood, 0, -0.06, 0);
+  mb.add(hullGeo(L, W, 0.2, 1), hullC, 0, 0.06, 0);
+  mb.add(hullGeo(L * 0.92, W, 0.02, 0.86), C.plank, 0, 0.255, 0);
+  mb.add(hullGeo(L * 1.01, W, 0.05, 1.02), C.team, 0, 0.09, 0, { team: true });
+  mb.box(0.04, 0.05, W * 0.78, C.dwood, -L * 0.48, 0.3, 0);
+  mb.box(L * 0.2, 0.18, W * 0.72, C.plank, -L * 0.34, 0.36, 0);
+  mb.box(L * 0.22, 0.03, W * 0.78, C.dwood, -L * 0.34, 0.46, 0);
+  mb.box(0.2, 0.025, 0.025, C.dwood, L * 0.55, 0.3, 0, { rz: 0.35 });
+  const sail = (x: number, h: number, w: number) => {
+    mb.cyl(0.025, 0.03, h, 5, C.dwood, x, 0.25 + h / 2, 0);
+    mb.box(0.03, h * 0.6, w, C.team, x + 0.03, 0.25 + h * 0.55, 0, { team: true });
+    mb.box(0.04, 0.03, w + 0.06, C.dwood, x + 0.03, 0.25 + h * 0.86, 0);
+  };
+  switch (t) {
+    case 'fishing_ship':
+      sail(0.05, 0.6, 0.4);
+      mb.box(0.2, 0.04, 0.2, '#b8a77a', -0.25, 0.28, 0.08);
+      mb.box(0.5, 0.012, 0.012, C.wood, 0.25, 0.42, 0.28, { rx: -0.4 });
+      break;
+    case 'transport_ship':
+      sail(0.0, 0.8, 0.55);
+      for (let i = 0; i < 3; i++) mb.box(0.12, 0.1, 0.12, C.plank, -0.3 + i * 0.25, 0.3, 0.12 * (i % 2 ? 1 : -1));
+      break;
+    case 'galley': case 'war_galley': case 'fire_galley':
+      sail(0.05, 0.85, 0.6);
+      for (let i = 0; i < 5; i++) for (const s of [-1, 1]) mb.box(0.03, 0.03, 0.32, C.wood, -0.35 + i * 0.17, 0.16, (W / 2 + 0.12) * s, { rx: 0.4 * s, ry: pose === 'walk1' ? 0.3 : pose === 'walk2' ? -0.3 : 0 });
+      if (t === 'war_galley') sail(-0.4, 0.6, 0.45);
+      if (t === 'fire_galley') { mb.cyl(0.08, 0.05, 0.12, 6, C.dmetal, L * 0.42, 0.34, 0); mb.ball(0.07, '#ff7a1c', L * 0.42, 0.45, 0); }
+      break;
+    case 'galleon': case 'cannon_galleon':
+      sail(0.3, 1.0, 0.65);
+      sail(-0.25, 0.8, 0.55);
+      mb.box(0.3, 0.2, W * 0.9, '#6b4428', -L * 0.38, 0.42, 0);
+      if (t === 'cannon_galleon') for (let i = 0; i < 3; i++) for (const s of [-1, 1]) mb.cyl(0.03, 0.035, 0.14, 6, C.black, -0.2 + i * 0.25, 0.2, (W / 2 + 0.04) * s, { rx: Math.PI / 2 });
+      break;
+  }
+}
+
+function monk(mb: MB, pose: string, variant: string) {
+  human(mb, { shirt: '#8a6a45', pants: C.brown, head: 'hood', robe: '#8a6a45', right: variant === 'relic' ? relicHand : staff, belt: C.team }, poseFor(pose, 'monk'));
+  mb.box(0.16, 0.05, 0.22, C.team, 0, 0.45, 0, { team: true });
+}
+
+function buildUnit(mb: MB, t: string, pose: string, variant: string) {
+  const naval = ['fishing_ship', 'transport_ship', 'galley', 'war_galley', 'galleon', 'fire_galley', 'cannon_galleon', 'trade_cog'];
+  if (naval.includes(t)) {
+    if (pose === 'dead') { mb.push(0, -0.25, 0, 0.6, 0, 0.3); ship(mb, t, 'idle'); mb.pop(); return; }
+    return ship(mb, t, pose);
+  }
+  if (t === 'villager') return deadWrap(mb, pose, () => villager(mb, pose === 'dead' ? 'idle' : pose, variant));
+  if (t === 'monk') return deadWrap(mb, pose, () => monk(mb, pose === 'dead' ? 'idle' : pose, variant));
+  if (['sheep', 'deer', 'boar', 'wolf'].includes(t)) return deadWrap(mb, pose, () => animal(mb, t, pose === 'dead' ? 'idle' : pose), 0.12);
+  if (['battering_ram', 'capped_ram', 'mangonel', 'onager', 'scorpion', 'heavy_scorpion', 'trebuchet', 'bombard_cannon'].includes(t)) {
+    if (pose === 'dead') { mb.push(0, -0.05, 0, 0.35, 0, 0.2); siege(mb, t, 'idle', variant); mb.pop(); return; }
+    return siege(mb, t, pose, variant);
+  }
+  if (t === 'war_elephant') return deadWrap(mb, pose, () => elephant(mb, pose === 'dead' ? 'idle' : pose), 0.3);
+  const cav = ['scout_cavalry', 'light_cavalry', 'hussar', 'knight', 'cavalier', 'paladin', 'cataphract', 'cavalry_archer', 'heavy_cavalry_archer', 'mangudai', 'camel_rider', 'heavy_camel_rider', 'mameluke'];
+  if (cav.includes(t)) return deadWrap(mb, pose, () => cavalry(mb, t, pose === 'dead' ? 'idle' : pose), 0.2);
+  return deadWrap(mb, pose, () => infantry(mb, t, pose === 'dead' ? 'idle' : pose));
+}
+
+// ---------------------------------------------------------------- buildings
+
+interface Style { wall: Col; wall2: Col; roof: Col; roof2: Col; trim: Col; base: Col; win: Col }
+const STYLES: Style[] = [
+  { wall: '#9c7247', wall2: '#6e4c2c', roof: '#c9a04d', roof2: '#a8813b', trim: '#5a3b20', base: '#7d7366', win: '#2a2018' },
+  { wall: '#9c7247', wall2: '#6e4c2c', roof: '#c9a04d', roof2: '#a8813b', trim: '#5a3b20', base: '#7d7366', win: '#2a2018' },
+  { wall: '#e8dcc0', wall2: '#6e4a2a', roof: '#8e5a34', roof2: '#6e4428', trim: '#5a3b20', base: '#8f877a', win: '#2a2018' },
+  { wall: '#d4ccb9', wall2: '#9d968a', roof: '#b0503a', roof2: '#8f3d2c', trim: '#6b625a', base: '#8a8378', win: '#30353f' },
+  { wall: '#ece6da', wall2: '#b0a898', roof: '#3f5f8a', roof2: '#2f4a6e', trim: '#d4a83a', base: '#9a9284', win: '#2e3f5a' },
+];
+
+function plinth(mb: MB, w: number, d: number, st: Style, h = 0.12) {
+  mb.box(w, h + 0.5, d, st.base, 0, h / 2 - 0.25, 0);
+}
+
+function windows(mb: MB, w: number, d: number, y: number, st: Style, n = 2, side = true) {
+  for (let i = 0; i < n; i++) {
+    const z = (i - (n - 1) / 2) * (d / (n + 0.5));
+    mb.box(0.03, 0.14, 0.1, st.win, w / 2 + 0.005, y, z);
+    if (side) {
+      const x = (i - (n - 1) / 2) * (w / (n + 0.5));
+      mb.box(0.1, 0.14, 0.03, st.win, x, y, d / 2 + 0.005);
+    }
+  }
+}
+
+function timber(mb: MB, w: number, h: number, d: number, y0: number, st: Style) {
+  for (const s of [-1, 1]) {
+    mb.box(w + 0.02, 0.04, 0.03, st.wall2, 0, y0 + h - 0.02, (d / 2) * s);
+    mb.box(0.03, 0.04, d + 0.02, st.wall2, (w / 2) * s, y0 + h - 0.02, 0);
+    mb.box(0.04, h, 0.04, st.wall2, (w / 2) * s, y0 + h / 2, (d / 2));
+    mb.box(0.04, h, 0.04, st.wall2, (w / 2) * s, y0 + h / 2, -(d / 2));
+  }
+  mb.box(0.03, h * 0.9, 0.03, st.wall2, w / 2 + 0.01, y0 + h / 2, 0, { rx: 0.7 });
+  mb.box(0.03, h * 0.9, 0.03, st.wall2, 0, y0 + h / 2, d / 2 + 0.01, { rz: 0.7 });
+}
+
+function house(mb: MB, w: number, d: number, h: number, st: Style, tier: number, roofH = 0.6, x = 0, z = 0, y = 0) {
+  mb.push(x, y, z);
+  mb.boxB(w, h, d, st.wall, 0, 0, 0);
+  if (tier === 2) timber(mb, w, h, d, 0, st);
+  if (tier >= 3) mb.boxB(w + 0.04, h * 0.35, d + 0.04, st.wall2, 0, 0, 0);
+  if (tier === 1) for (let i = 0; i < 4; i++) mb.box(w + 0.01, 0.02, d + 0.01, st.wall2, 0, h * (0.2 + i * 0.22), 0);
+  mb.gable(w + 0.18, d + 0.18, roofH, st.roof, 0, h, 0);
+  mb.box(w + 0.2, 0.04, 0.06, st.roof2, 0, h + roofH - 0.01, 0);
+  mb.box(0.03, 0.26, 0.16, st.win, w / 2 + 0.005, 0.13, 0);
+  windows(mb, w, d, h * 0.65, st, 1, true);
+  mb.pop();
+}
+
+function banner(mb: MB, x: number, y: number, z: number, h = 0.7, w = 0.3) {
+  mb.cylB(0.018, 0.022, h, 5, C.dwood, x, y, z);
+  mb.box(w, w * 0.65, 0.02, C.team, x + w / 2, y + h - w * 0.35, z, { team: true });
+  mb.ball(0.03, C.gold, x, y + h + 0.02, z);
+}
+
+function crenels(mb: MB, w: number, d: number, y: number, col: Col, size = 0.12) {
+  const n = Math.max(2, Math.round(w / (size * 2.2)));
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n - 0.5;
+    mb.boxB(size, size, size, col, t * w, y, d / 2 - size / 2);
+    mb.boxB(size, size, size, col, t * w, y, -d / 2 + size / 2);
+  }
+  const m = Math.max(2, Math.round(d / (size * 2.2)));
+  for (let i = 0; i < m; i++) {
+    const t = (i + 0.5) / m - 0.5;
+    mb.boxB(size, size, size, col, w / 2 - size / 2, y, t * d);
+    mb.boxB(size, size, size, col, -w / 2 + size / 2, y, t * d);
+  }
+}
+
+function tower(mb: MB, r: number, h: number, st: Style, tier: number, x = 0, z = 0, roof = true) {
+  const seg = 8;
+  mb.cylB(r, r * 1.08, h, seg, tier >= 3 ? st.wall2 : st.wall, x, 0, z);
+  if (roof) {
+    mb.coneB(r * 1.35, r * 2.2, seg, st.roof, x, h, z);
+    mb.ball(0.04, C.gold, x, h + r * 2.2, z);
+  } else {
+    mb.cylB(r * 1.12, r * 1.12, 0.1, seg, st.wall2, x, h, z);
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; mb.boxB(0.1, 0.12, 0.1, st.wall2, x + Math.cos(a) * r, h + 0.1, z + Math.sin(a) * r); }
+  }
+  mb.box(0.03, 0.16, 0.08, st.win, x + r + 0.01, h * 0.7, z);
+}
+
+function buildBuilding(mb: MB, t: string, tier: number) {
+  const st = STYLES[tier];
+  const stone = tier >= 3;
+  switch (t) {
+    case 'town_center': {
+      plinth(mb, 3.9, 3.9, st, 0.14);
+      mb.boxB(3.5, 0.05, 3.5, '#9c8f7a', 0, 0.14, 0);
+      // main hall
+      mb.push(0, 0.14, 0);
+      mb.boxB(2.5, 1.1, 2.5, st.wall, 0, 0, 0);
+      if (tier === 2) timber(mb, 2.5, 1.1, 2.5, 0, st);
+      if (stone) { mb.boxB(2.56, 0.4, 2.56, st.wall2, 0, 0, 0); crenels(mb, 2.5, 2.5, 1.1, st.wall2, 0.14); }
+      mb.pyramid(stone ? 2.2 : 2.9, stone ? 2.2 : 2.9, 0.9, st.roof, 0, 1.1, 0);
+      // central tower
+      mb.boxB(1.0, 2.1, 1.0, stone ? st.wall2 : st.wall, 0, 1.0, 0);
+      if (tier === 2) timber(mb, 1.0, 1.0, 1.0, 2.1, st);
+      mb.box(0.04, 0.3, 0.3, st.win, 0.51, 2.7, 0);
+      mb.box(0.3, 0.3, 0.04, st.win, 0, 2.7, 0.51);
+      mb.cylB(0.1, 0.12, 0.18, 6, C.gold, 0, 2.6, 0);
+      mb.pyramid(1.4, 1.4, 0.8, st.roof2, 0, 3.1, 0);
+      banner(mb, 0, 3.85, 0, 0.6, 0.35);
+      // door & windows
+      mb.boxB(0.04, 0.55, 0.45, st.trim, 1.26, 0, 0);
+      mb.boxB(0.04, 0.5, 0.38, '#2a1d12', 1.27, 0, 0);
+      windows(mb, 2.5, 2.5, 0.75, st, 3, true);
+      mb.pop();
+      // corner annexes
+      for (const [x, z] of [[1.45, 1.45], [-1.45, 1.45], [1.45, -1.45], [-1.45, -1.45]]) {
+        if (stone) tower(mb, 0.36, 1.5, st, tier, x, z, tier === 4);
+        else { mb.boxB(0.7, 0.7, 0.7, st.wall, x, 0.14, z); mb.pyramid(0.95, 0.95, 0.5, st.roof, x, 0.84, z); }
+      }
+      banner(mb, 1.9, 0.14, 1.2, 0.9, 0.3);
+      banner(mb, 1.9, 0.14, -1.2, 0.9, 0.3);
+      // firewood & barrels
+      mb.cylB(0.13, 0.13, 0.25, 7, C.dwood, -1.75, 0.14, 0.4);
+      mb.cylB(0.13, 0.13, 0.25, 7, C.dwood, -1.75, 0.14, 0.12);
+      break;
+    }
+    case 'house': {
+      plinth(mb, 1.85, 1.85, st, 0.08);
+      house(mb, 1.3, 1.1, 0.7, st, tier, 0.62, 0, -0.1, 0.08);
+      mb.boxB(0.14, 0.45, 0.14, stone ? st.wall2 : C.dstone, -0.4, 0.75, 0.3);
+      // team shutters
+      mb.box(0.03, 0.18, 0.05, C.team, 0.66, 0.6, 0.2, { team: true });
+      mb.box(0.03, 0.18, 0.05, C.team, 0.66, 0.6, -0.2, { team: true });
+      // garden
+      mb.boxB(1.2, 0.05, 0.35, C.soil, 0, 0.08, 0.7);
+      for (let i = 0; i < 4; i++) mb.ball(0.07, C.leaf3, -0.45 + i * 0.3, 0.17, 0.7);
+      break;
+    }
+    case 'mill': {
+      plinth(mb, 1.85, 1.85, st, 0.08);
+      mb.cylB(0.55, 0.65, 1.3, 8, stone ? st.wall2 : st.wall, -0.1, 0.08, 0);
+      mb.coneB(0.75, 0.6, 8, st.roof, -0.1, 1.38, 0);
+      mb.box(0.12, 0.12, 0.12, C.dwood, 0.55, 1.15, 0);
+      for (let i = 0; i < 4; i++) {
+        mb.push(0.62, 1.15, 0, i * Math.PI / 2 + 0.3, 0, 0);
+        mb.box(0.03, 0.85, 0.05, C.dwood, 0, 0.45, 0);
+        mb.box(0.02, 0.6, 0.2, C.team, 0.01, 0.5, 0.11, { team: true });
+        mb.pop();
+      }
+      mb.boxB(0.04, 0.4, 0.25, '#2a1d12', 0.52, 0.08, 0.3);
+      for (let i = 0; i < 3; i++) mb.cylB(0.1, 0.1, 0.2, 7, C.linen, -0.6 + i * 0.22, 0.08, 0.7);
+      break;
+    }
+    case 'lumber_camp': {
+      plinth(mb, 1.85, 1.85, st, 0.05);
+      for (const [x, z] of [[0.6, 0.6], [-0.6, 0.6], [0.6, -0.6], [-0.6, -0.6]]) mb.boxB(0.08, 0.8, 0.08, C.dwood, x, 0.05, z);
+      mb.box(1.45, 0.06, 1.45, stone ? st.roof : C.plank, 0, 0.9, 0, { rx: 0.18 });
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3 - i; j++) mb.cyl(0.09, 0.09, 1.1, 7, C.trunk, -0.1, 0.15 + i * 0.16, -0.25 + j * 0.18 + i * 0.09, { rz: Math.PI / 2 });
+      mb.cylB(0.18, 0.2, 0.22, 8, C.trunk, 0.6, 0.05, 0.75);
+      mb.box(0.3, 0.025, 0.025, C.wood, 0.62, 0.38, 0.75, { rz: 1.0 });
+      banner(mb, -0.75, 0.05, 0.75, 0.9, 0.25);
+      break;
+    }
+    case 'mining_camp': {
+      plinth(mb, 1.85, 1.85, st, 0.05);
+      for (const [x, z] of [[0.6, 0.6], [-0.6, 0.6], [0.6, -0.6], [-0.6, -0.6]]) mb.boxB(0.08, 0.8, 0.08, C.dwood, x, 0.05, z);
+      mb.gable(1.5, 1.5, 0.35, stone ? st.roof : C.plank, 0, 0.85, 0);
+      mb.boxB(0.5, 0.25, 0.35, C.wood, -0.2, 0.15, 0.1);
+      wheelsAt(mb, -0.2, 0.1, 0.1);
+      for (let i = 0; i < 5; i++) mb.ball(0.08, i % 2 ? C.gold : C.dstone, -0.35 + i * 0.07, 0.43, 0.1 + (i % 2) * 0.08);
+      mb.ball(0.25, C.dstone, 0.4, 0.15, -0.3, {}, 0.6);
+      mb.ball(0.15, C.gold, 0.45, 0.25, -0.25, {}, 0.6);
+      banner(mb, -0.75, 0.05, 0.75, 0.9, 0.25);
+      break;
+    }
+    case 'farm': {
+      mb.boxB(2.92, 0.06, 2.92, C.soil, 0, 0, 0);
+      for (let i = 0; i < 7; i++) mb.boxB(2.7, 0.04, 0.16, C.soil2, 0, 0.06, -1.2 + i * 0.4);
+      for (const [x, z] of [[1.42, 1.42], [-1.42, 1.42], [1.42, -1.42], [-1.42, -1.42]]) mb.boxB(0.06, 0.25, 0.06, C.dwood, x, 0, z);
+      mb.box(2.85, 0.03, 0.03, C.wood, 0, 0.18, 1.42);
+      mb.box(2.85, 0.03, 0.03, C.wood, 0, 0.18, -1.42);
+      mb.box(0.03, 0.03, 2.85, C.wood, -1.42, 0.18, 0);
+      break;
+    }
+    case 'dock': {
+      for (const [x, z] of [[1.3, 1.3], [-1.3, 1.3], [1.3, -1.3], [-1.3, -1.3], [0, 1.3], [0, -1.3], [1.3, 0], [-1.3, 0]]) mb.cylB(0.07, 0.07, 1.2, 6, C.dwood, x, -0.9, z);
+      mb.boxB(2.9, 0.1, 2.9, C.plank, 0, 0.15, 0);
+      for (let i = 0; i < 9; i++) mb.box(0.02, 0.105, 2.9, C.wood, -1.3 + i * 0.32, 0.2, 0);
+      house(mb, 1.1, 0.9, 0.6, st, tier, 0.45, -0.65, -0.65, 0.25);
+      // crane
+      mb.boxB(0.1, 1.3, 0.1, C.dwood, 0.9, 0.25, -0.9);
+      mb.box(0.9, 0.07, 0.07, C.dwood, 0.6, 1.5, -0.9, { rz: -0.2 });
+      mb.box(0.012, 0.6, 0.012, C.rope, 0.2, 1.2, -0.9);
+      mb.box(0.18, 0.15, 0.18, C.plank, 0.2, 0.86, -0.9);
+      for (let i = 0; i < 3; i++) mb.cylB(0.1, 0.1, 0.22, 7, C.dwood, 0.6 + i * 0.25, 0.25, 0.9);
+      banner(mb, 1.25, 0.25, 1.25, 1.1, 0.4);
+      break;
+    }
+    case 'barracks': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      house(mb, 2.3, 1.4, 0.95, st, tier, 0.75, -0.1, -0.5, 0.1);
+      if (stone) crenels(mb, 1.0, 1.0, 1.5, st.wall2, 0.1);
+      // yard
+      mb.boxB(1.0, 0.03, 0.8, '#a08a64', 0.3, 0.1, 0.85);
+      mb.boxB(0.05, 0.5, 0.05, C.dwood, 0.75, 0.1, 0.9);
+      mb.box(0.25, 0.04, 0.04, C.dwood, 0.75, 0.48, 0.9);
+      mb.ball(0.08, C.straw, 0.75, 0.62, 0.9);
+      for (let i = 0; i < 4; i++) mb.box(0.02, 0.6, 0.02, C.wood, -0.9 + i * 0.12, 0.42, 0.35, { rz: 0.15 });
+      mb.cone(0.03, 0.08, 4, C.metal, -0.86, 0.76, 0.35);
+      banner(mb, 1.2, 0.1, -1.2, 1.3, 0.4);
+      banner(mb, -1.25, 0.1, 1.2, 1.0, 0.32);
+      break;
+    }
+    case 'archery_range': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      house(mb, 1.5, 2.2, 0.9, st, tier, 0.6, -0.6, -0.2, 0.1);
+      for (let i = 0; i < 2; i++) {
+        mb.boxB(0.04, 0.4, 0.04, C.dwood, 0.9, 0.1, -0.6 + i * 0.9);
+        mb.cyl(0.24, 0.24, 0.12, 10, C.straw, 0.95, 0.55, -0.6 + i * 0.9, { rz: Math.PI / 2 });
+        mb.cyl(0.16, 0.16, 0.13, 10, C.white, 0.95, 0.55, -0.6 + i * 0.9, { rz: Math.PI / 2 });
+        mb.cyl(0.07, 0.07, 0.14, 8, C.red, 0.95, 0.55, -0.6 + i * 0.9, { rz: Math.PI / 2 });
+      }
+      banner(mb, 1.2, 0.1, 1.15, 1.2, 0.35);
+      break;
+    }
+    case 'stable': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      mb.push(-0.3, 0.1, -0.3);
+      mb.boxB(2.0, 0.85, 1.6, st.wall, 0, 0, 0);
+      if (tier === 2) timber(mb, 2.0, 0.85, 1.6, 0, st);
+      mb.gable(2.2, 1.85, 0.8, st.roof, 0, 0.85, 0);
+      mb.boxB(0.04, 0.6, 0.6, st.trim, 1.01, 0, 0);
+      mb.box(0.05, 0.6, 0.04, st.wall2, 1.03, 0.3, 0, { rx: 0.75 });
+      mb.box(0.05, 0.6, 0.04, st.wall2, 1.03, 0.3, 0, { rx: -0.75 });
+      mb.pop();
+      for (let i = 0; i < 5; i++) mb.boxB(0.05, 0.35, 0.05, C.dwood, 1.2, 0.1, -1.2 + i * 0.6);
+      mb.box(0.03, 0.04, 2.5, C.wood, 1.2, 0.35, 0);
+      mb.box(0.03, 0.04, 2.5, C.wood, 1.2, 0.22, 0);
+      mb.boxB(0.35, 0.25, 0.25, C.straw, 0.6, 0.1, 1.0);
+      mb.boxB(0.35, 0.25, 0.25, C.straw, 0.3, 0.1, 1.15);
+      banner(mb, -1.2, 0.1, 1.2, 1.2, 0.35);
+      break;
+    }
+    case 'blacksmith': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      house(mb, 1.9, 1.5, 0.9, st, tier, 0.65, -0.3, -0.3, 0.1);
+      mb.boxB(0.35, 1.9, 0.35, stone ? st.wall2 : C.dstone, -0.9, 0.1, 0.35);
+      mb.boxB(0.6, 0.35, 0.5, C.dstone, 0.75, 0.1, 0.75);
+      mb.box(0.3, 0.06, 0.3, C.glow, 0.75, 0.47, 0.75);
+      mb.boxB(0.25, 0.22, 0.12, C.dmetal, 0.2, 0.1, 0.9);
+      mb.box(0.32, 0.05, 0.14, C.dmetal, 0.2, 0.34, 0.9);
+      banner(mb, 1.2, 0.1, -1.2, 1.1, 0.35);
+      break;
+    }
+    case 'market': {
+      plinth(mb, 2.85, 2.85, st, 0.06);
+      house(mb, 1.3, 1.1, 0.8, st, tier, 0.55, -0.7, -0.7, 0.06);
+      const awn = [C.team, '#d8a73a', '#5a8f4a', C.team];
+      for (let i = 0; i < 3; i++) {
+        const x = 0.75, z = -0.9 + i * 0.85;
+        for (const [dx, dz] of [[0.3, 0.3], [-0.3, 0.3], [0.3, -0.3], [-0.3, -0.3]]) mb.boxB(0.04, 0.6, 0.04, C.dwood, x + dx, 0.06, z + dz);
+        mb.box(0.75, 0.04, 0.75, awn[i], x, 0.7, z, { team: i !== 1 && i !== 2, rz: 0.15 });
+        mb.boxB(0.55, 0.25, 0.3, C.plank, x, 0.06, z);
+        mb.ball(0.06, i === 0 ? C.red : i === 1 ? C.gold : C.green, x - 0.1, 0.36, z);
+        mb.ball(0.06, '#e07a2a', x + 0.1, 0.36, z);
+      }
+      for (let i = 0; i < 3; i++) mb.cylB(0.11, 0.11, 0.25, 7, C.dwood, -0.9 + i * 0.25, 0.06, 0.9);
+      mb.boxB(0.3, 0.3, 0.3, C.plank, -0.2, 0.06, 1.0);
+      break;
+    }
+    case 'monastery': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      mb.push(-0.2, 0.1, 0);
+      mb.boxB(2.0, 1.05, 1.1, st.wall, 0, 0, 0);
+      mb.gable(2.1, 1.3, 0.75, st.roof, 0, 1.05, 0);
+      for (let i = 0; i < 3; i++) { mb.box(0.12, 0.35, 0.03, '#3b6fb0', -0.6 + i * 0.6, 0.6, 0.56); mb.box(0.12, 0.35, 0.03, '#3b6fb0', -0.6 + i * 0.6, 0.6, -0.56); }
+      mb.boxB(0.04, 0.6, 0.35, st.trim, 1.01, 0, 0);
+      mb.pop();
+      mb.boxB(0.7, 2.0, 0.7, st.wall2, -1.0, 0.1, 0.9);
+      mb.box(0.04, 0.3, 0.2, C.black, -0.64, 1.75, 0.9);
+      mb.coneB(0.55, 0.9, 4, st.roof2, -1.0, 2.1, 0.9, { ry: Math.PI / 4 });
+      mb.boxB(0.04, 0.3, 0.04, C.gold, -1.0, 3.0, 0.9);
+      mb.box(0.04, 0.04, 0.18, C.gold, -1.0, 3.2, 0.9);
+      mb.boxB(0.5, 0.03, 0.5, '#7a9a4a', 0.8, 0.1, 1.0);
+      banner(mb, 1.25, 0.1, -1.1, 1.0, 0.3);
+      break;
+    }
+    case 'university': {
+      plinth(mb, 2.85, 2.85, st, 0.12);
+      mb.boxB(2.3, 1.0, 2.0, st.wall, 0, 0.12, 0);
+      for (let i = 0; i < 5; i++) mb.cylB(0.07, 0.07, 1.0, 6, C.white, 1.25, 0.12, -0.8 + i * 0.4);
+      mb.boxB(0.5, 0.1, 2.2, st.wall2, 1.2, 1.12, 0);
+      mb.boxB(2.4, 0.12, 2.1, st.wall2, 0, 1.12, 0);
+      mb.ball(0.7, st.roof, 0, 1.24, 0, {}, 0.8, 1);
+      mb.ball(0.05, C.gold, 0, 1.85, 0);
+      banner(mb, -1.2, 0.12, 1.2, 1.4, 0.35);
+      break;
+    }
+    case 'siege_workshop': {
+      plinth(mb, 2.85, 2.85, st, 0.1);
+      for (const [x, z] of [[1.2, 1.2], [-1.2, 1.2], [1.2, -1.2], [-1.2, -1.2], [0, 1.2], [0, -1.2]]) mb.boxB(0.12, 1.1, 0.12, C.dwood, x, 0.1, z);
+      mb.gable(2.7, 2.7, 0.7, st.roof, 0, 1.2, 0);
+      mb.boxB(2.5, 0.6, 0.05, st.wall, 0, 0.1, -1.2);
+      wheelsAt(mb, 0.3, 0.3, 0.25);
+      mb.box(1.0, 0.06, 0.06, C.wood, 0.0, 0.7, 0.3, { rz: 0.4 });
+      mb.boxB(0.6, 0.15, 0.4, C.wood, 0.3, 0.3, 0.3);
+      banner(mb, 1.3, 0.1, 1.3, 1.3, 0.35);
+      break;
+    }
+    case 'castle': {
+      const S = 3.8;
+      plinth(mb, S, S, st, 0.15);
+      mb.boxB(3.0, 1.4, 3.0, st.wall2, 0, 0.15, 0);
+      crenels(mb, 3.0, 3.0, 1.55, st.wall2, 0.16);
+      for (const [x, z] of [[1.5, 1.5], [-1.5, 1.5], [1.5, -1.5], [-1.5, -1.5]]) {
+        mb.cylB(0.5, 0.55, 2.0, 8, st.wall2, x, 0.15, z);
+        mb.cylB(0.56, 0.56, 0.12, 8, st.base, x, 2.15, z);
+        mb.coneB(0.62, 0.9, 8, st.roof, x, 2.27, z);
+        mb.box(0.25, 0.18, 0.02, C.team, x + 0.3, 2.5, z, { team: true, ry: Math.PI / 2 });
+      }
+      mb.boxB(1.5, 2.6, 1.5, st.wall, 0, 0.15, 0);
+      crenels(mb, 1.5, 1.5, 2.75, st.wall, 0.14);
+      mb.pyramid(1.3, 1.3, 0.9, st.roof2, 0, 2.75, 0);
+      banner(mb, 0, 3.6, 0, 0.8, 0.5);
+      mb.boxB(0.06, 0.8, 0.7, '#3a2a1c', 1.51, 0.15, 0);
+      mb.box(0.08, 0.8, 0.9, st.base, 1.52, 1.0, 0);
+      mb.box(0.05, 0.9, 0.5, C.team, 1.53, 1.0, 0.9, { team: true });
+      mb.box(0.05, 0.9, 0.5, C.team, 1.53, 1.0, -0.9, { team: true });
+      break;
+    }
+    case 'wonder': {
+      plinth(mb, 4.9, 4.9, st, 0.2);
+      mb.boxB(4.4, 0.5, 4.4, '#d8cfb8', 0, 0.2, 0);
+      mb.boxB(3.6, 1.2, 3.6, '#ece4d0', 0, 0.7, 0);
+      for (let i = 0; i < 6; i++) { mb.cylB(0.09, 0.09, 1.2, 6, C.white, 1.85, 0.7, -1.5 + i * 0.6); mb.cylB(0.09, 0.09, 1.2, 6, C.white, -1.5 + i * 0.6, 0.7, 1.85); }
+      mb.boxB(2.6, 0.9, 2.6, '#e0d6bf', 0, 1.9, 0);
+      mb.ball(1.15, C.gold, 0, 2.8, 0, {}, 0.95, 1);
+      mb.cylB(0.05, 0.05, 0.6, 5, C.gold, 0, 3.8, 0);
+      for (const [x, z] of [[2.0, 2.0], [-2.0, 2.0], [2.0, -2.0], [-2.0, -2.0]]) {
+        mb.cylB(0.22, 0.26, 3.2, 8, '#ece4d0', x, 0.2, z);
+        mb.coneB(0.3, 0.8, 8, C.gold, x, 3.4, z);
+      }
+      mb.box(0.06, 1.0, 1.2, C.team, 1.82, 1.3, 0, { team: true });
+      mb.box(1.2, 1.0, 0.06, C.team, 0, 1.3, 1.82, { team: true });
+      break;
+    }
+    case 'watch_tower': {
+      plinth(mb, 0.98, 0.98, st, 0.06);
+      if (tier <= 2) {
+        mb.boxB(0.7, 0.7, 0.7, C.dstone, 0, 0.06, 0);
+        for (const [x, z] of [[0.28, 0.28], [-0.28, 0.28], [0.28, -0.28], [-0.28, -0.28]]) mb.boxB(0.08, 1.5, 0.08, C.dwood, x, 0.7, z);
+        mb.boxB(0.85, 0.08, 0.85, C.plank, 0, 2.0, 0);
+        mb.boxB(0.85, 0.3, 0.04, C.plank, 0, 2.08, 0.41);
+        mb.boxB(0.85, 0.3, 0.04, C.plank, 0, 2.08, -0.41);
+        mb.boxB(0.04, 0.3, 0.85, C.plank, 0.41, 2.08, 0);
+        mb.pyramid(0.95, 0.95, 0.45, st.roof, 0, 2.4, 0);
+        banner(mb, 0, 2.85, 0, 0.4, 0.22);
+      } else {
+        const h = tier === 4 ? 2.9 : 2.5;
+        mb.cylB(0.38, 0.44, h, 8, st.wall2, 0, 0.06, 0);
+        mb.cylB(0.46, 0.46, 0.1, 8, st.base, 0, h, 0);
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; mb.boxB(0.1, 0.14, 0.1, st.wall2, Math.cos(a) * 0.4, h + 0.1, Math.sin(a) * 0.4); }
+        mb.coneB(0.45, 0.7, 8, st.roof, 0, h + 0.24, 0);
+        mb.box(0.03, 0.2, 0.08, st.win, 0.43, h * 0.65, 0);
+        banner(mb, 0, h + 0.9, 0, 0.35, 0.22);
+      }
+      break;
+    }
+    case 'outpost': {
+      for (const [x, z] of [[0.25, 0.25], [-0.25, 0.25], [0.25, -0.25], [-0.25, -0.25]]) mb.boxB(0.07, 1.3, 0.07, C.dwood, x, 0, z, { rx: z * 0.15, rz: -x * 0.15 });
+      mb.boxB(0.6, 0.06, 0.6, C.plank, 0, 1.3, 0);
+      mb.boxB(0.06, 0.3, 0.06, C.dwood, 0.2, 1.36, 0.2);
+      mb.ball(0.07, C.glow, 0.2, 1.72, 0.2);
+      banner(mb, -0.2, 1.36, -0.2, 0.45, 0.2);
+      break;
+    }
+    case 'palisade_wall': {
+      for (const [x, z] of [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25], [0, 0]]) {
+        mb.cylB(0.13, 0.14, 0.8, 6, C.trunk, x, -0.1, z);
+        mb.coneB(0.13, 0.2, 6, '#7b5a3a', x, 0.7, z);
+      }
+      mb.box(1.0, 0.06, 0.06, C.dwood, 0, 0.45, 0);
+      mb.box(0.06, 0.06, 1.0, C.dwood, 0, 0.45, 0);
+      break;
+    }
+    case 'stone_wall': {
+      mb.boxB(1.0, 1.0, 1.0, st.wall2, 0, -0.2, 0);
+      mb.boxB(1.04, 0.15, 1.04, st.base, 0, -0.2, 0);
+      for (const [x, z] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) mb.boxB(0.22, 0.2, 0.22, st.wall2, x, 0.8, z);
+      break;
+    }
+    case 'gate': {
+      for (const s of [-1, 1]) {
+        mb.boxB(1.0, 1.4, 0.32, st.wall2, 0, -0.2, 0.34 * s);
+        crenels(mb, 1.0, 0.32, 1.2, st.wall2, 0.12);
+      }
+      mb.boxB(1.0, 0.35, 1.0, st.wall2, 0, 0.85, 0);
+      mb.box(1.02, 0.25, 0.4, C.team, 0, 0.75, 0, { team: true });
+      mb.boxB(0.06, 0.8, 0.36, '#3a2a1c', 0.3, -0.05, 0);
+      break;
+    }
+    case 'palisade_gate': {
+      for (const s of [-1, 1]) {
+        mb.cylB(0.15, 0.16, 1.1, 6, C.trunk, 0, -0.1, 0.38 * s);
+        mb.coneB(0.15, 0.2, 6, '#7b5a3a', 0, 1.0, 0.38 * s);
+      }
+      mb.box(0.1, 0.1, 1.0, C.dwood, 0, 0.85, 0);
+      mb.box(0.06, 0.18, 0.6, C.team, 0, 0.7, 0, { team: true });
+      break;
+    }
+  }
+}
+
+function wheelsAt(mb: MB, x: number, z: number, r: number) {
+  for (const s of [-1, 1]) mb.cyl(r, r, 0.05, 8, C.dwood, x, r, z + 0.22 * s, { rx: Math.PI / 2 });
+}
+
+function foundation(mb: MB, s: number) {
+  const w = s - 0.1;
+  mb.boxB(w, 0.06, 0.12, C.plank, 0, 0, w / 2 - 0.06);
+  mb.boxB(w, 0.06, 0.12, C.plank, 0, 0, -w / 2 + 0.06);
+  mb.boxB(0.12, 0.06, w, C.plank, w / 2 - 0.06, 0, 0);
+  mb.boxB(0.12, 0.06, w, C.plank, -w / 2 + 0.06, 0, 0);
+  mb.boxB(w - 0.2, 0.03, w - 0.2, '#a08a64', 0, 0, 0);
+  for (const [x, z] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) mb.boxB(0.07, 0.25, 0.07, C.dwood, (x * w) / 2 - x * 0.06, 0, (z * w) / 2 - z * 0.06);
+}
+
+function scaffold(mb: MB, s: number, h: number) {
+  const w = s / 2 + 0.05;
+  for (const [x, z] of [[1, 1], [-1, 1], [1, -1], [-1, -1], [0, 1], [0, -1], [1, 0], [-1, 0]]) mb.boxB(0.05, h, 0.05, C.wood, x * w, 0, z * w);
+  for (let y = 0.4; y < h; y += 0.5) {
+    mb.box(s + 0.1, 0.04, 0.04, C.wood, 0, y, w);
+    mb.box(s + 0.1, 0.04, 0.04, C.wood, 0, y, -w);
+    mb.box(0.04, 0.04, s + 0.1, C.wood, w, y, 0);
+    mb.box(0.04, 0.04, s + 0.1, C.wood, -w, y, 0);
+  }
+}
+
+function rubbleModel(mb: MB, s: number) {
+  let seed = s * 13;
+  const r = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+  mb.boxB(s * 0.9, 0.04, s * 0.9, '#4a4038', 0, 0, 0);
+  for (let i = 0; i < s * s * 3; i++) {
+    mb.box(0.12 + r() * 0.2, 0.08 + r() * 0.12, 0.12 + r() * 0.2, r() < 0.5 ? C.dstone : '#3b2f26', (r() - 0.5) * s * 0.8, 0.06, (r() - 0.5) * s * 0.8, { ry: r() * 3 });
+  }
+}
+
+// ---------------------------------------------------------------- resources
+
+function tree(mb: MB, v: number, biome: string) {
+  const kind = biome === 'palm' ? (v % 3 === 0 ? 1 : 3) : v % 3;
+  const s = 0.85 + ((v * 7) % 10) / 30;
+  mb.push(0, 0, 0, 0, (v % 6) * 1.1, 0, s);
+  if (kind === 3) {
+    mb.cylB(0.06, 0.08, 1.4, 6, '#8a6a42', 0, 0, 0, { rz: 0.12 });
+    for (let i = 0; i < 6; i++) mb.box(0.55, 0.03, 0.16, C.leaf, 0.27 * Math.cos(i), 1.4, 0.27 * Math.sin(i), { ry: -i, rz: -0.4 });
+  } else if (kind === 0 || kind === 2) {
+    // pine
+    mb.cylB(0.07, 0.09, 0.4, 6, C.trunk, 0, 0, 0);
+    const col = kind === 0 ? C.pine : C.pine2;
+    mb.coneB(0.48, 0.65, 7, col, 0, 0.3, 0);
+    mb.coneB(0.38, 0.55, 7, col, 0, 0.7, 0);
+    mb.coneB(0.26, 0.5, 7, col, 0, 1.05, 0);
+  } else {
+    // oak
+    mb.cylB(0.08, 0.11, 0.7, 6, C.trunk, 0, 0, 0);
+    mb.ball(0.42, C.leaf, 0, 0.95, 0, {}, 0.85);
+    mb.ball(0.3, C.leaf2, 0.25, 0.85, 0.12);
+    mb.ball(0.28, C.leaf3, -0.18, 1.05, -0.15);
+    mb.ball(0.25, C.leaf, -0.05, 0.8, 0.28);
+  }
+  mb.pop();
+}
+
+function resource(mb: MB, t: string, v: number) {
+  switch (t) {
+    case 'stump':
+      mb.cylB(0.12, 0.14, 0.15, 7, C.trunk, 0, 0, 0);
+      mb.cyl(0.08, 0.1, 0.9, 6, C.trunk, 0.25, 0.1, 0.1, { rz: Math.PI / 2, ry: v });
+      mb.ball(0.2, C.leaf2, 0.7, 0.15, 0.25, {}, 0.6);
+      break;
+    case 'berry':
+      mb.ball(0.32, '#3f7a2a', 0, 0.22, 0, {}, 0.75, 1);
+      for (let i = 0; i < 9; i++) mb.ball(0.045, i % 3 ? '#c4283a' : '#7a2a6a', Math.cos(i * 2.4) * 0.28, 0.2 + (i % 3) * 0.08, Math.sin(i * 2.4) * 0.28);
+      break;
+    case 'gold':
+      mb.ball(0.36, '#7a7066', 0, 0.12, 0, { ry: v }, 0.6);
+      mb.ball(0.22, '#8a8076', 0.22, 0.1, 0.18, {}, 0.7);
+      for (let i = 0; i < 6; i++) mb.ball(0.08 + (i % 3) * 0.02, C.gold, Math.cos(i * 1.7 + v) * 0.24, 0.24 + (i % 2) * 0.06, Math.sin(i * 1.7 + v) * 0.24, { ry: i });
+      break;
+    case 'stone':
+      mb.ball(0.36, '#9c968c', 0, 0.12, 0, { ry: v }, 0.65);
+      mb.ball(0.24, '#b5afa4', 0.24, 0.12, -0.15, {}, 0.8);
+      mb.box(0.24, 0.18, 0.2, '#c8c2b8', -0.2, 0.2, 0.15, { ry: v });
+      break;
+    case 'fish':
+      for (let i = 0; i < 3; i++) {
+        mb.push(Math.cos(i * 2.1) * 0.25, -0.12, Math.sin(i * 2.1) * 0.25, 0, i * 2.1, 0);
+        mb.box(0.22, 0.06, 0.08, '#8fb4c4', 0, 0, 0);
+        mb.box(0.06, 0.08, 0.02, '#8fb4c4', -0.13, 0, 0);
+        mb.pop();
+      }
+      break;
+    case 'relic':
+      mb.boxB(0.4, 0.12, 0.3, C.stone, 0, 0, 0);
+      mb.boxB(0.3, 0.2, 0.2, C.gold, 0, 0.12, 0);
+      mb.pyramid(0.3, 0.2, 0.08, '#f4d26a', 0, 0.32, 0);
+      mb.box(0.04, 0.04, 0.22, C.red, 0, 0.22, 0);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------- decorations & effects
+
+function deco(mb: MB, t: string, v: number) {
+  switch (t) {
+    case 'grass':
+      for (let i = 0; i < 4; i++) mb.cone(0.03, 0.18, 3, i % 2 ? '#5f9a35' : '#6fae3d', Math.cos(i * 1.7 + v) * 0.08, 0.09, Math.sin(i * 1.7 + v) * 0.08, { rz: (i - 1.5) * 0.25 });
+      break;
+    case 'flower':
+      mb.cone(0.02, 0.14, 3, '#5f9a35', 0, 0.07, 0);
+      mb.ball(0.04, ['#e8d34a', '#e05a7a', '#f2f2f2', '#9a6ae0'][v % 4], 0, 0.15, 0);
+      break;
+    case 'rock':
+      mb.ball(0.12, '#8d877c', 0, 0.04, 0, { ry: v }, 0.6);
+      break;
+    case 'bush':
+      mb.ball(0.18, '#4a8a30', 0, 0.1, 0, {}, 0.7);
+      mb.ball(0.13, '#3f7a28', 0.12, 0.08, 0.06, {}, 0.7);
+      break;
+    case 'reed':
+      for (let i = 0; i < 5; i++) mb.box(0.02, 0.35, 0.02, '#6f8a3a', Math.cos(i * 1.3) * 0.1, 0.17, Math.sin(i * 1.3) * 0.1, { rz: (i - 2) * 0.1 });
+      break;
+    case 'cactus':
+      mb.cylB(0.07, 0.08, 0.45, 6, '#4f8a4a', 0, 0, 0);
+      mb.cylB(0.04, 0.05, 0.18, 6, '#4f8a4a', 0.1, 0.18, 0, { rz: -0.8 });
+      break;
+  }
+}
+
+function effect(mb: MB, t: string) {
+  switch (t) {
+    case 'puff': mb.ball(0.5, '#ffffff', 0, 0, 0, {}, 1, 0); break;
+    case 'flame': mb.cone(0.3, 1.0, 5, '#ff8a2a', 0, 0.5, 0); break;
+    case 'spark': mb.box(0.1, 0.1, 0.1, '#ffd35a', 0, 0, 0); break;
+    case 'chunk': mb.box(0.12, 0.08, 0.1, '#7a6a5a', 0, 0, 0); break;
+    case 'ring': {
+      const g = new THREE.RingGeometry(0.85, 1.0, 24, 1);
+      g.rotateX(-Math.PI / 2);
+      mb.add(g, '#ffffff', 0, 0, 0);
+      break;
+    }
+    case 'disc': {
+      const g = new THREE.CircleGeometry(1, 20);
+      g.rotateX(-Math.PI / 2);
+      mb.add(g, '#ffffff', 0, 0, 0);
+      break;
+    }
+    case 'tile': {
+      const g = new THREE.PlaneGeometry(1, 1);
+      g.rotateX(-Math.PI / 2);
+      mb.add(g, '#ffffff', 0, 0, 0);
+      break;
+    }
+    case 'quad': {
+      const g = new THREE.PlaneGeometry(1, 1);
+      mb.add(g, '#ffffff', 0, 0, 0);
+      break;
+    }
+    case 'arrow':
+      mb.box(0.36, 0.02, 0.02, C.wood, 0, 0, 0);
+      mb.cone(0.025, 0.06, 4, C.metal, 0.2, 0, 0, { rz: -Math.PI / 2 });
+      mb.box(0.06, 0.01, 0.05, C.white, -0.16, 0, 0);
+      break;
+    case 'bolt':
+      mb.box(0.5, 0.035, 0.035, C.dwood, 0, 0, 0);
+      mb.cone(0.04, 0.1, 4, C.metal, 0.3, 0, 0, { rz: -Math.PI / 2 });
+      break;
+    case 'stone': mb.ball(0.12, C.dstone, 0, 0, 0); break;
+    case 'cannon': mb.ball(0.08, '#2a2a2a', 0, 0, 0, {}, 1, 1); break;
+    case 'bullet': mb.box(0.12, 0.03, 0.03, '#ffe08a', 0, 0, 0); break;
+    case 'axe': mb.box(0.12, 0.03, 0.03, C.wood, 0, 0, 0); mb.box(0.05, 0.07, 0.02, C.metal, 0.05, 0.03, 0); break;
+    case 'fire': mb.ball(0.08, '#ff7a1c', 0, 0, 0); break;
+    case 'flag':
+      mb.cylB(0.02, 0.025, 0.9, 5, C.dwood, 0, 0, 0);
+      mb.box(0.35, 0.24, 0.02, C.team, 0.18, 0.75, 0, { team: true });
+      break;
+    case 'marker': {
+      const g = new THREE.RingGeometry(0.25, 0.36, 16, 1);
+      g.rotateX(-Math.PI / 2);
+      mb.add(g, '#ffffff', 0, 0, 0);
+      break;
+    }
+    case 'cropRow':
+      for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) mb.boxB(0.1, 0.22, 0.1, '#ffffff', -1.2 + j * 0.4, 0, -1.2 + i * 0.4);
+      break;
+  }
+}
+
+// ---------------------------------------------------------------- dispatch
+
+function buildModel(mb: MB, key: string) {
+  const parts = key.split(':');
+  switch (parts[0]) {
+    case 'u': buildUnit(mb, parts[1], parts[2] ?? 'idle', parts[3] ?? ''); break;
+    case 'b': buildBuilding(mb, parts[1], +(parts[2] ?? 1)); break;
+    case 'found': foundation(mb, +parts[1]); break;
+    case 'scaffold': scaffold(mb, +parts[1], +parts[2]); break;
+    case 'rubble': rubbleModel(mb, +parts[1]); break;
+    case 'tree': tree(mb, +parts[1], parts[2] ?? ''); break;
+    case 'n': resource(mb, parts[1], +(parts[2] ?? 0)); break;
+    case 'd': deco(mb, parts[1], +(parts[2] ?? 0)); break;
+    case 'fx': effect(mb, parts[1]); break;
+  }
+}

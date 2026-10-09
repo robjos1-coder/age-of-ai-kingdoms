@@ -1,0 +1,786 @@
+import {
+  AGE_NAMES, BUILDINGS, CIVS, TECH_BY_ID, buildingDef, unitDef,
+  type BuildingKey, type Cost, type UnitKey,
+} from '../data/defs';
+import { Game, TICK, type Entity, type SaveData } from '../sim/game';
+import { buildingStats, canAfford, missing, techCost, unitStats } from '../sim/stats';
+import type { Building, GameEvent, Settings, Unit } from '../sim/types';
+import { Renderer, type Quality, type ViewState } from '../render/renderer';
+import { initAudio, music, play } from '../audio/sfx';
+import { ICON } from './icons';
+import { Hud } from './hud';
+import { Input } from './input';
+import { Menus } from './menus';
+
+export interface Cmd {
+  key: string;
+  icon: string;
+  name: string;
+  desc?: string;
+  cost?: Cost;
+  disabled?: string | null;
+  poor?: boolean;
+  count?: number;
+  progress?: number;
+  on?: boolean;
+  tag?: string;
+  age?: boolean;
+  act: (shift?: boolean) => void;
+  long?: () => void;
+}
+
+export type Mode =
+  | { k: 'normal' }
+  | { k: 'place'; type: BuildingKey; x: number; y: number; set: boolean }
+  | { k: 'wall'; type: BuildingKey; sx?: number; sy?: number; ex?: number; ey?: number }
+  | { k: 'target'; action: 'attackmove' | 'patrol' | 'garrison' | 'unload' | 'rally' | 'attackground' | 'repair'; label: string };
+
+export interface Prefs {
+  quality: Quality;
+  sfx: number;
+  music: number;
+  muted: boolean;
+  speed: number;
+  showHotkeys: boolean;
+  edgeScroll: boolean;
+}
+
+const PREFS_KEY = 'aoak-prefs';
+export const SAVE_KEYS = ['aoak-save-auto', 'aoak-save-1', 'aoak-save-2', 'aoak-save-3'];
+
+export class App {
+  canvas: HTMLCanvasElement;
+  game: Game | null = null;
+  renderer: Renderer | null = null;
+  hud: Hud;
+  input: Input;
+  menus: Menus;
+  view: ViewState = { selection: new Set(), hover: 0, ghost: null, markers: [], flashIds: new Map() };
+  mode: Mode = { k: 'normal' };
+  menuPath: 'root' | 'eco' | 'mil' = 'root';
+  paused = false;
+  prefs: Prefs;
+  groups = new Map<number, number[]>();
+  lastAlert: { x: number; y: number; t: number } | null = null;
+  boxMode = false;
+  private acc = 0;
+  private lastT = 0;
+  private autosaveT = 0;
+  private running = false;
+  private overShown = false;
+  private battleT = 0;
+  idleCycle = 0;
+
+  constructor() {
+    this.canvas = document.getElementById('game') as HTMLCanvasElement;
+    this.prefs = { quality: defaultQuality(), sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false };
+    try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
+    this.hud = new Hud(this);
+    this.input = new Input(this);
+    this.menus = new Menus(this);
+    window.addEventListener('resize', () => this.renderer?.resize());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.game && !this.game.over) this.saveTo(SAVE_KEYS[0]);
+    });
+    const unlock = () => { initAudio(); music.resume(); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+  }
+
+  savePrefs() {
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.prefs)); } catch { /* ignore */ }
+  }
+
+  // ------------------------------------------------------------------ lifecycle
+
+  start(settings: Settings, save?: SaveData) {
+    this.stop();
+    const loading = document.getElementById('loading')!;
+    loading.classList.remove('hidden');
+    // yield a frame so the loading screen shows
+    setTimeout(() => {
+      try {
+        this.game = new Game(settings, save);
+        this.view = { selection: new Set(), hover: 0, ghost: null, markers: [], flashIds: new Map() };
+        this.renderer = new Renderer(this.canvas, this.game, this.view, this.prefs.quality);
+        this.mode = { k: 'normal' };
+        this.menuPath = 'root';
+        this.groups.clear();
+        this.overShown = false;
+        this.paused = false;
+        this.hud.show(true);
+        this.hud.reset();
+        this.menus.hideAll();
+        this.running = true;
+        this.lastT = performance.now();
+        music.play('game');
+        // pre-warm icons
+        this.hud.prewarm();
+        requestAnimationFrame(this.frame);
+        if (!save) this.hud.toast(`You are the ${CIVS[this.game.players[this.game.human].civ].name}. Build your economy and conquer your enemies!`, 'gold', 6000);
+      } catch (e) {
+        console.error(e);
+        alert('Failed to start the game: ' + (e as Error).message);
+        this.menus.showMain();
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }, 30);
+  }
+
+  stop() {
+    this.running = false;
+    this.renderer?.dispose();
+    this.renderer = null;
+    this.game = null;
+    this.hud.show(false);
+  }
+
+  quitToMenu() {
+    if (this.game && !this.game.over) this.saveTo(SAVE_KEYS[0]);
+    this.stop();
+    this.menus.showMain();
+    music.play('menu');
+  }
+
+  private frame = (now: number) => {
+    if (!this.running || !this.game || !this.renderer) return;
+    requestAnimationFrame(this.frame);
+    const g = this.game;
+    let dt = (now - this.lastT) / 1000;
+    this.lastT = now;
+    if (dt > 0.25) dt = 0.25;
+    this.input.update(dt);
+    if (!this.paused && !g.over) {
+      this.acc += dt * this.prefs.speed;
+      let n = 0;
+      while (this.acc >= TICK && n < 10) {
+        g.tick();
+        this.acc -= TICK;
+        n++;
+      }
+      if (n >= 10) this.acc = 0;
+      this.autosaveT += dt;
+      if (this.autosaveT > 60) { this.autosaveT = 0; this.saveTo(SAVE_KEYS[0]); }
+    }
+    this.processEvents();
+    this.cleanSelection();
+    this.updateGhost();
+    this.renderer.render(this.paused ? 1 : Math.min(1, this.acc / TICK), dt);
+    this.hud.update(dt);
+    if (g.over && !this.overShown) {
+      this.overShown = true;
+      setTimeout(() => this.menus.showGameOver(), 1500);
+      try { localStorage.removeItem(SAVE_KEYS[0]); } catch { /* ignore */ }
+    }
+  };
+
+  // ------------------------------------------------------------------ events
+
+  private processEvents() {
+    const g = this.game!;
+    const r = this.renderer!;
+    const evs = g.events;
+    if (!evs.length) return;
+    g.events = [];
+    const me = g.human;
+    for (const e of evs) {
+      r.handleEvent(e);
+      this.eventSound(e);
+      switch (e.k) {
+        case 'attack':
+          this.lastAlert = { x: e.x!, y: e.y!, t: g.time };
+          this.hud.toast(e.text!, 'bad', 4000, () => r.lookAt(e.x!, e.y!));
+          play('alert');
+          this.battleT = g.time;
+          if (music.mode !== 'battle') music.play('battle');
+          break;
+        case 'built':
+          if (e.o === me) { this.hud.toast(`${buildingDef(e.t!).name} completed.`, 'good', 2500); play('built'); }
+          break;
+        case 'research':
+          if (e.o === me && e.text) { this.hud.toast(e.text, 'good', 3000); play('research'); }
+          break;
+        case 'age':
+          this.hud.toast(e.text!, e.o === me ? 'gold' : undefined, 5000);
+          if (e.o === me) play('age');
+          break;
+        case 'housed': this.hud.toast(e.text!, 'bad', 3000); play('error'); break;
+        case 'defeat':
+          if (e.o) this.hud.toast(e.text!, e.o === me ? 'bad' : 'gold', 6000);
+          else { play('defeat'); music.play('end'); }
+          break;
+        case 'victory': play('victory'); music.play('end'); break;
+        case 'msg': case 'relic': case 'wonder':
+          if (e.text && (e.o === undefined || e.o === me || e.k !== 'msg')) this.hud.toast(e.text, e.k === 'msg' ? undefined : 'gold', 4000);
+          break;
+        case 'convert':
+          if (e.text) this.hud.toast(e.text, e.o === me ? 'good' : 'bad', 3000);
+          break;
+      }
+    }
+    if (music.mode === 'battle' && g.time - this.battleT > 60) music.play('game');
+  }
+
+  private eventSound(e: GameEvent) {
+    const g = this.game!, r = this.renderer!;
+    if (e.x === undefined || e.y === undefined) return;
+    if (!g.isVisible(e.x, e.y) || !r.onScreen(e.x, e.y)) return;
+    switch (e.k) {
+      case 'hit':
+        if (e.t === 'melee') play('sword', 0.7);
+        else if (e.t === 'stone') play('thud');
+        else if (e.t === 'cannon') play('thud');
+        break;
+      case 'fire':
+        if (e.t === 'arrow' || e.t === 'bolt') play('arrow', 0.6);
+        else if (e.t === 'cannon' || e.t === 'bullet') play('cannon', 0.7);
+        break;
+      case 'death': play('death', 0.6); break;
+      case 'collapse': play('collapse'); break;
+      case 'convert': play('wololo'); break;
+    }
+  }
+
+  // ------------------------------------------------------------------ selection
+
+  private cleanSelection() {
+    const g = this.game!;
+    for (const id of [...this.view.selection]) {
+      const e = g.get(id);
+      if (!e) { this.view.selection.delete(id); continue; }
+      if (e.k === 'u' && (e.dead !== undefined || e.inside)) this.view.selection.delete(id);
+    }
+  }
+
+  selected(): Entity[] {
+    const g = this.game;
+    if (!g) return [];
+    const out: Entity[] = [];
+    for (const id of this.view.selection) { const e = g.get(id); if (e) out.push(e); }
+    return out;
+  }
+
+  ownUnits(): Unit[] {
+    const g = this.game!;
+    return this.selected().filter((e): e is Unit => e.k === 'u' && e.o === g.human && e.dead === undefined && !e.inside);
+  }
+
+  ownBuilding(): Building | null {
+    const s = this.selected();
+    const g = this.game!;
+    if (s.length === 1 && s[0].k === 'b' && s[0].o === g.human) return s[0];
+    return null;
+  }
+
+  select(ids: number[], add = false) {
+    if (!add) this.view.selection.clear();
+    for (const id of ids) this.view.selection.add(id);
+    this.menuPath = 'root';
+    if (ids.length) play('select');
+    this.hud.dirty = true;
+  }
+
+  deselect() {
+    this.view.selection.clear();
+    this.menuPath = 'root';
+    this.setMode({ k: 'normal' });
+    this.hud.dirty = true;
+  }
+
+  selectSameType(e: Entity, onScreen = true) {
+    const g = this.game!, r = this.renderer!;
+    if (e.k === 'u') {
+      const ids = [...g.units.values()].filter((u) => u.o === e.o && u.t === e.t && u.dead === undefined && !u.inside && (!onScreen || r.onScreen(u.x, u.y))).map((u) => u.id);
+      this.select(ids);
+    } else if (e.k === 'b') {
+      const ids = [...g.buildings.values()].filter((b) => b.o === e.o && b.t === e.t && (!onScreen || r.onScreen(...g.bcenter(b)))).map((b) => b.id);
+      this.select(ids);
+    }
+  }
+
+  selectIdleVillager() {
+    const g = this.game!;
+    const idle = [...g.units.values()].filter((u) => u.o === g.human && u.t === 'villager' && u.dead === undefined && !u.inside && !u.task && u.idleT > 1);
+    if (!idle.length) { this.hud.toast('No idle villagers.', undefined, 1500); return; }
+    const u = idle[this.idleCycle++ % idle.length];
+    this.select([u.id]);
+    this.renderer!.lookAt(u.x, u.y);
+  }
+
+  selectArmy() {
+    const g = this.game!;
+    const ids = [...g.units.values()].filter((u) => {
+      if (u.o !== g.human || u.dead !== undefined || u.inside) return false;
+      const d = unitDef(u.t);
+      return !d.cls.includes('villager') && u.t !== 'fishing_ship' && u.t !== 'trade_cog' && !d.cls.includes('animal');
+    }).map((u) => u.id);
+    if (!ids.length) { this.hud.toast('You have no army.', undefined, 1500); return; }
+    this.select(ids);
+  }
+
+  goHome() {
+    const g = this.game!;
+    const tcs = [...g.buildings.values()].filter((b) => b.o === g.human && b.t === 'town_center');
+    if (!tcs.length) return;
+    const tc = tcs[this.idleCycle++ % tcs.length];
+    this.select([tc.id]);
+    this.renderer!.lookAt(...g.bcenter(tc));
+  }
+
+  jumpToAlert() {
+    if (this.lastAlert) this.renderer!.lookAt(this.lastAlert.x, this.lastAlert.y);
+  }
+
+  setGroup(n: number) {
+    this.groups.set(n, [...this.view.selection]);
+    this.hud.toast(`Group ${n} set.`, undefined, 1000);
+  }
+
+  recallGroup(n: number) {
+    const ids = (this.groups.get(n) ?? []).filter((id) => this.game!.get(id));
+    if (!ids.length) return;
+    const same = ids.length === this.view.selection.size && ids.every((i) => this.view.selection.has(i));
+    this.select(ids);
+    if (same) {
+      const e = this.game!.get(ids[0]);
+      if (e) this.renderer!.lookAt(...this.game!.epos(e));
+    }
+  }
+
+  // ------------------------------------------------------------------ modes
+
+  setMode(m: Mode) {
+    this.mode = m;
+    this.hud.hideTip();
+    if (m.k === 'normal') this.view.ghost = null;
+    this.hud.dirty = true;
+    this.hud.updateModebar();
+  }
+
+  private updateGhost() {
+    const g = this.game!;
+    const m = this.mode;
+    if (m.k === 'place') {
+      const ok = g.canPlace(g.human, m.type, m.x, m.y) && !g.buildBlock(g.human, m.type);
+      this.view.ghost = m.set || !isTouch() ? { type: m.type, x: m.x, y: m.y, ok } : null;
+    } else if (m.k === 'wall') {
+      if (m.sx !== undefined) {
+        const tiles = g.wallLine(m.sx, m.sy!, m.ex ?? m.sx, m.ey ?? m.sy!);
+        this.view.ghost = { type: m.type, x: m.sx, y: m.sy!, ok: true, tiles };
+      } else this.view.ghost = null;
+    } else this.view.ghost = null;
+  }
+
+  beginPlace(type: BuildingKey) {
+    const g = this.game!, r = this.renderer!;
+    const d = buildingDef(type);
+    if (d.wall) { this.setMode({ k: 'wall', type }); return; }
+    const c = r.groundAt(r.width / 2, r.height / 2) ?? { x: r.tx, y: r.tz };
+    const x = Math.round(c.x - d.size / 2), y = Math.round(c.y - d.size / 2);
+    this.setMode({ k: 'place', type, x, y, set: false });
+    void g;
+  }
+
+  placeAt(wx: number, wy: number) {
+    const m = this.mode;
+    if (m.k !== 'place') return;
+    const d = buildingDef(m.type);
+    m.x = Math.floor(wx - d.size / 2 + 0.5);
+    m.y = Math.floor(wy - d.size / 2 + 0.5);
+    m.set = true;
+    this.hud.updateModebar();
+  }
+
+  confirmPlace(keep = false): boolean {
+    const g = this.game!;
+    const m = this.mode;
+    if (m.k === 'place') {
+      const vils = this.ownUnits().filter((u) => u.t === 'villager').map((u) => u.id);
+      const cost = buildingStats(g.players[g.human], m.type).cost;
+      if (!canAfford(g.players[g.human], cost)) { this.notEnough(cost); return false; }
+      const b = g.cmdBuild(g.human, vils, m.type, m.x, m.y);
+      if (!b) { this.hud.toast("Can't build there.", 'bad', 1500); play('error'); return false; }
+      play('place');
+      if (!keep) this.setMode({ k: 'normal' });
+      else m.set = false;
+      return true;
+    }
+    if (m.k === 'wall' && m.sx !== undefined) {
+      const vils = this.ownUnits().filter((u) => u.t === 'villager').map((u) => u.id);
+      const n = g.cmdBuildWall(g.human, vils, m.type, m.sx, m.sy!, m.ex ?? m.sx, m.ey ?? m.sy!);
+      if (!n) { this.hud.toast("Can't build there (or not enough resources).", 'bad', 1800); play('error'); return false; }
+      play('place');
+      this.setMode({ k: 'normal' });
+      return true;
+    }
+    return false;
+  }
+
+  notEnough(cost: Cost) {
+    const g = this.game!;
+    const miss = missing(g.players[g.human], cost);
+    this.hud.toast(`Not enough ${miss.join(' and ')}.`, 'bad', 1600);
+    this.hud.flashRes(miss);
+    play('error');
+  }
+
+  // ------------------------------------------------------------------ world interaction
+
+  /** Primary tap/click on the world. touch=true uses the mobile "smart tap" scheme. */
+  tapWorld(sx: number, sy: number, opts: { touch: boolean; shift?: boolean; double?: boolean }) {
+    const g = this.game!, r = this.renderer!;
+    const ground = r.groundAt(sx, sy);
+    const m = this.mode;
+    if (m.k === 'place') {
+      if (!ground) return;
+      if (opts.touch) { this.placeAt(ground.x, ground.y); return; }
+      this.placeAt(ground.x, ground.y);
+      this.confirmPlace(!!opts.shift);
+      return;
+    }
+    if (m.k === 'wall') {
+      if (!ground) return;
+      const tx = Math.floor(ground.x), ty = Math.floor(ground.y);
+      if (m.sx === undefined) { m.sx = tx; m.sy = ty; m.ex = tx; m.ey = ty; }
+      else { m.ex = tx; m.ey = ty; }
+      this.hud.updateModebar();
+      return;
+    }
+    const hit = r.pickEntity(sx, sy);
+    if (m.k === 'target') {
+      this.execTarget(m.action, hit, ground);
+      if (!opts.shift) this.setMode({ k: 'normal' });
+      return;
+    }
+    const own = (e: Entity | null) => !!e && (e.k === 'u' || e.k === 'b') && e.o === g.human;
+    if (!opts.touch) {
+      // desktop left click = select
+      if (hit && (hit.k === 'u' || hit.k === 'b' || hit.k === 'r' || hit.k === 'relic')) {
+        if (opts.double) { this.selectSameType(hit); return; }
+        if (opts.shift && own(hit)) {
+          if (this.view.selection.has(hit.id)) this.view.selection.delete(hit.id);
+          else this.view.selection.add(hit.id);
+          this.hud.dirty = true;
+          return;
+        }
+        this.select([hit.id]);
+      } else if (!opts.shift) this.deselect();
+      return;
+    }
+    // touch: smart tap
+    const units = this.ownUnits();
+    const vilSel = units.length > 0 && units.every((u) => u.t === 'villager');
+    if (hit && own(hit)) {
+      if (opts.double) { this.selectSameType(hit); return; }
+      // villagers tapping their own unfinished / farm / damaged building -> work on it
+      if (vilSel && hit.k === 'b' && !this.view.selection.has(hit.id)) {
+        const needsWork = !hit.done || hit.t === 'farm' || hit.hp < buildingStats(g.players[hit.o], hit.t).hp || (units.some((u) => u.ca > 0) && buildingDef(hit.t).drop);
+        if (needsWork) { this.command(sx, sy, hit, ground, !!opts.shift); return; }
+      }
+      // military tapping a transport / garrisonable building: select it instead (use Garrison button)
+      if (opts.shift) { this.view.selection.add(hit.id); this.hud.dirty = true; return; }
+      this.select([hit.id]);
+      return;
+    }
+    if (units.length) {
+      this.command(sx, sy, hit, ground, !!opts.shift);
+      return;
+    }
+    const b = this.ownBuilding();
+    if (b && b.done && buildingDef(b.t).trains.length && ground) {
+      this.setRally(b, ground.x, ground.y, hit);
+      return;
+    }
+    if (hit) this.select([hit.id]);
+    else this.deselect();
+  }
+
+  /** Secondary click (desktop right click) or touch command. */
+  command(sx: number, sy: number, hit?: Entity | null, ground?: { x: number; y: number } | null, queue = false) {
+    const g = this.game!, r = this.renderer!;
+    if (this.mode.k !== 'normal') { this.setMode({ k: 'normal' }); return; }
+    hit = hit === undefined ? r.pickEntity(sx, sy) : hit;
+    ground = ground === undefined ? r.groundAt(sx, sy) : ground;
+    const units = this.ownUnits();
+    if (!units.length) {
+      const b = this.ownBuilding();
+      if (b && ground) this.setRally(b, ground.x, ground.y, hit ?? null);
+      return;
+    }
+    const ids = units.map((u) => u.id);
+    if (hit && !(hit.k === 'u' && hit.o === g.human && !unitDef(hit.t).cargo && hit.t !== 'sheep' && !(unitDef(hit.t).cls.includes('animal')))) {
+      const did = g.cmdTarget(g.human, ids, hit.id, queue);
+      if (did) {
+        const [x, y] = g.epos(hit);
+        const enemy = (hit.k === 'u' || hit.k === 'b') && g.enemy(g.human, hit.o);
+        this.view.markers.push({ x, y, t: r.time, color: enemy ? '#ff4a3d' : '#ffe65a' });
+        if (hit.k === 'b' || hit.k === 'u') r.flash(hit.id);
+        play(enemy || did === 'attack' ? 'attackCmd' : 'move');
+        if (did === 'convert') play('wololo');
+        return;
+      }
+    }
+    if (hit && hit.k === 'u' && hit.o === g.human && unitDef(hit.t).cargo && !units.some((u) => unitDef(u.t).naval)) {
+      g.cmdGarrison(g.human, ids, hit.id);
+      play('move');
+      return;
+    }
+    if (!ground) return;
+    g.cmdMove(g.human, ids, ground.x, ground.y, { queue });
+    this.view.markers.push({ x: ground.x, y: ground.y, t: r.time, color: '#7be07a' });
+    play('move');
+  }
+
+  private setRally(b: Building, x: number, y: number, hit: Entity | null) {
+    const g = this.game!;
+    g.cmdRally(g.human, b.id, x, y, hit && (hit.k === 'r' || hit.k === 'b' || hit.k === 'u') ? hit.id : undefined);
+    this.view.markers.push({ x, y, t: this.renderer!.time, color: '#5ab8ff' });
+    play('move');
+  }
+
+  private execTarget(action: string, hit: Entity | null, ground: { x: number; y: number } | null) {
+    const g = this.game!;
+    const ids = this.ownUnits().map((u) => u.id);
+    switch (action) {
+      case 'attackmove':
+        if (hit && (hit.k === 'u' || hit.k === 'b') && g.enemy(g.human, hit.o)) g.cmdAttack(g.human, ids, hit.id);
+        else if (ground) g.cmdMove(g.human, ids, ground.x, ground.y, { am: true });
+        play('attackCmd');
+        break;
+      case 'patrol':
+        if (ground) g.cmdMove(g.human, ids, ground.x, ground.y, { patrol: true });
+        play('move');
+        break;
+      case 'garrison':
+        if (hit && (hit.k === 'b' || (hit.k === 'u' && unitDef(hit.t).cargo))) { g.cmdGarrison(g.human, ids, hit.id); play('move'); }
+        else play('error');
+        break;
+      case 'repair':
+        if (hit && hit.k === 'b' && hit.o === g.human) { g.cmdTarget(g.human, ids, hit.id); play('move'); }
+        else play('error');
+        break;
+      case 'unload':
+        if (ground) g.cmdUnload(g.human, ids, ground.x, ground.y);
+        play('move');
+        break;
+      case 'attackground':
+        if (ground) g.cmdAttackGround(g.human, ids, ground.x, ground.y);
+        play('attackCmd');
+        break;
+      case 'rally': {
+        const b = this.ownBuilding();
+        if (b && ground) this.setRally(b, ground.x, ground.y, hit);
+        break;
+      }
+    }
+    if (ground) this.view.markers.push({ x: ground.x, y: ground.y, t: this.renderer!.time, color: '#ff8a3d' });
+  }
+
+  boxSelect(x0: number, y0: number, x1: number, y1: number, add: boolean) {
+    const g = this.game!;
+    const us = this.renderer!.unitsInRect(x0, y0, x1, y1, g.human);
+    // prefer military over villagers if both
+    const mil = us.filter((u) => !unitDef(u.t).cls.includes('villager') && u.t !== 'sheep');
+    const pick = (mil.length ? mil : us.filter((u) => u.t !== 'sheep'));
+    const final = pick.length ? pick : us;
+    if (!final.length && !add) { this.deselect(); return; }
+    this.select(final.map((u) => u.id), add);
+  }
+
+  // ------------------------------------------------------------------ commands for the HUD
+
+  commands(): Cmd[] {
+    const g = this.game!, r = this.renderer!;
+    const me = g.human;
+    const p = g.players[me];
+    const units = this.ownUnits();
+    const b = this.ownBuilding();
+    const out: Cmd[] = [];
+    const col = p.color;
+    const uIcon = (t: UnitKey) => `<img src="${r.icon(`u:${t}:idle:${t === 'villager' ? 'build|none|m' : ''}`, col)}">`;
+    const bIcon = (t: BuildingKey) => `<img src="${r.icon(`b:${t}:${Math.max(2, p.age)}`, col)}">`;
+
+    if (units.length) {
+      const vils = units.filter((u) => u.t === 'villager');
+      const others = units.filter((u) => u.t !== 'villager');
+      if (vils.length && !others.length) {
+        if (this.menuPath === 'eco' || this.menuPath === 'mil') {
+          const list = (Object.keys(BUILDINGS) as BuildingKey[]).filter((t) => buildingDef(t).menu === this.menuPath && buildingDef(t).build).sort((a, b) => buildingDef(a).age - buildingDef(b).age);
+          for (const t of list) {
+            const d = buildingDef(t);
+            const cost = buildingStats(p, t).cost;
+            const block = g.buildBlock(me, t);
+            out.push({
+              key: 'b-' + t, icon: bIcon(t), name: d.name, desc: d.desc, cost, disabled: block, poor: !canAfford(p, cost),
+              act: () => {
+                if (block) { this.hud.toast(block, 'bad', 1800); play('error'); return; }
+                if (!canAfford(p, cost)) { this.notEnough(cost); return; }
+                this.beginPlace(t);
+              },
+            });
+          }
+          out.push({ key: 'back', icon: ICON.back, name: 'Back', act: () => { this.menuPath = 'root'; this.hud.dirty = true; } });
+          return out;
+        }
+        out.push({ key: 'eco', icon: ICON.buildeco, name: 'Build Economic', desc: 'Houses, drop-off camps, farms and civic buildings.', act: () => { this.menuPath = 'eco'; this.hud.dirty = true; } });
+        out.push({ key: 'mil', icon: ICON.buildmil, name: 'Build Military', desc: 'Barracks, walls, towers, castles…', act: () => { this.menuPath = 'mil'; this.hud.dirty = true; } });
+        out.push({ key: 'repair', icon: ICON.repair, name: 'Repair', desc: 'Tap a damaged building to repair it (costs resources).', act: () => this.setMode({ k: 'target', action: 'repair', label: 'Tap a building to repair' }) });
+      }
+      const mil = others.filter((u) => !unitDef(u.t).cls.includes('animal'));
+      const canFight = units.some((u) => unitStats(p, u.t).atk > 0 && u.t !== 'villager');
+      if (canFight) {
+        out.push({ key: 'am', icon: ICON.attackmove, name: 'Attack Move', desc: 'Move and fight anything along the way.', act: () => this.setMode({ k: 'target', action: 'attackmove', label: 'Tap where to attack-move' }) });
+        out.push({ key: 'patrol', icon: ICON.patrol, name: 'Patrol', desc: 'Patrol between here and a point.', act: () => this.setMode({ k: 'target', action: 'patrol', label: 'Tap the patrol point' }) });
+      }
+      if (units.some((u) => ['mangonel', 'onager', 'trebuchet', 'bombard_cannon', 'cannon_galleon'].includes(u.t))) {
+        out.push({ key: 'ag', icon: ICON.target, name: 'Attack Ground', desc: 'Bombard an area.', act: () => this.setMode({ k: 'target', action: 'attackground', label: 'Tap the ground to bombard' }) });
+      }
+      if (units.some((u) => u.cargo && u.cargo.length)) {
+        out.push({ key: 'unload', icon: ICON.unload, name: 'Unload', desc: 'Tap the shore to unload.', act: () => this.setMode({ k: 'target', action: 'unload', label: 'Tap the shore to unload' }) });
+      }
+      if (units.some((u) => !unitDef(u.t).naval)) {
+        out.push({ key: 'gar', icon: ICON.garrison, name: 'Garrison', desc: 'Enter a Town Center, tower, castle or transport.', act: () => this.setMode({ k: 'target', action: 'garrison', label: 'Tap a building or ship to garrison' }) });
+      }
+      out.push({ key: 'stop', icon: ICON.stop, name: 'Stop', act: () => { g.cmdStop(me, units.map((u) => u.id)); play('click'); } });
+      if (canFight && mil.length) {
+        const st = mil[0].stance;
+        const stances: [0 | 1 | 2 | 3, string, string, string][] = [[0, 'aggressive', 'Aggressive', 'Chase and attack any enemy in sight.'], [1, 'defensive', 'Defensive', 'Attack nearby enemies, then return.'], [2, 'stand', 'Stand Ground', 'Hold position, attack only in range.'], [3, 'noattack', 'No Attack', 'Never attack.']];
+        for (const [s, ic, n, d] of stances) out.push({ key: 'st' + s, icon: ICON[ic], name: n, desc: d, on: st === s, act: () => { g.cmdStance(me, mil.map((u) => u.id), s); this.hud.dirty = true; play('click'); } });
+      }
+      out.push({ key: 'del', icon: ICON.del, name: 'Delete', desc: 'Delete the selected units.', act: () => { g.cmdDelete(me, units.map((u) => u.id)); this.deselect(); } });
+      return out;
+    }
+
+    if (b) {
+      if (!b.done) {
+        out.push({ key: 'del', icon: ICON.del, name: 'Delete', desc: 'Cancel this construction (refund if not started).', act: () => { g.cmdDelete(me, [b.id]); this.deselect(); } });
+        return out;
+      }
+      const ageBusy = b.q.some((q) => q.tech && TECH_BY_ID[q.tech].isAge);
+      for (const t of g.trainable(b)) {
+        const st = unitStats(p, t);
+        const block = g.trainBlock(b, t) ?? (ageBusy ? 'Researching the next age' : null);
+        const n = b.q.filter((q) => q.u === t).length;
+        const ud = unitDef(t);
+        out.push({
+          key: 'u-' + t, icon: uIcon(t), name: ud.name, desc: ud.desc + unitStatLine(st, ud.range > 0), cost: st.cost, disabled: block, poor: !canAfford(p, st.cost), count: n || undefined,
+          tag: ud.cls.includes('unique') ? '★' : undefined,
+          act: (shift) => this.train(b, t, shift ? 5 : 1),
+          long: () => this.train(b, t, 5),
+        });
+      }
+      for (const id of g.techsAt(b)) {
+        const t = TECH_BY_ID[id];
+        const cost = techCost(p, id);
+        const block = g.techBlock(me, id);
+        let icon = ICON[t.icon] ?? ICON.up;
+        if (t.upgrade) icon = `<img src="${r.icon(`u:${t.upgrade[1]}:idle:`, col)}"><span class="tag" style="font-size:14px">⬆</span>`;
+        out.push({
+          key: 't-' + id, icon, name: t.name, desc: t.desc + (t.civ ? ` (${CIVS[t.civ].name} unique)` : ''), cost, disabled: block, poor: !canAfford(p, cost), age: !!t.isAge,
+          act: () => {
+            if (block) { this.hud.toast(block, 'bad', 2000); play('error'); return; }
+            if (!canAfford(p, cost)) { this.notEnough(cost); return; }
+            if (g.cmdResearch(me, b.id, id)) play('click');
+          },
+        });
+      }
+      // queue in progress for this building's research (show as on)
+      if (b.t === 'market') {
+        for (const res of ['food', 'wood', 'stone'] as const) {
+          out.push({ key: 'buy-' + res, icon: `${ICON[res]}<span class="tag" style="color:#7be07a">BUY</span>`, name: `Buy 100 ${res}`, cost: { gold: g.marketPrice(me, 'buy', res) }, act: () => { if (!g.cmdMarket(me, 'buy', res)) this.notEnough({ gold: g.marketPrice(me, 'buy', res) }); else play('click'); } });
+          out.push({ key: 'sell-' + res, icon: `${ICON[res]}<span class="tag" style="color:#ff8a7a">SELL</span>`, name: `Sell 100 ${res} for ${g.marketPrice(me, 'sell', res)} gold`, act: () => { if (!g.cmdMarket(me, 'sell', res)) this.notEnough({ [res]: 100 }); else play('click'); } });
+        }
+      }
+      if (buildingDef(b.t).trains.length || b.t === 'town_center') {
+        out.push({ key: 'rally', icon: ICON.rally, name: 'Set Gather Point', desc: 'Tap a spot (or a resource) where new units go.', act: () => this.setMode({ k: 'target', action: 'rally', label: 'Tap the gather point' }) });
+      }
+      if (b.gar.length) out.push({ key: 'ungar', icon: ICON.ungarrison, name: 'Ungarrison All', act: () => { g.cmdUngarrison(me, b.id); play('click'); } });
+      if (b.t === 'town_center') {
+        out.push({ key: 'bell', icon: ICON.bell, name: 'Ring Town Bell', desc: 'All villagers take shelter in nearby buildings.', act: () => { g.cmdTownBell(me, true); play('bell'); } });
+        out.push({ key: 'clear', icon: ICON.allclear, name: 'All Clear', desc: 'Villagers return to work.', act: () => { g.cmdTownBell(me, false); play('click'); } });
+      }
+      if (b.t === 'farm' || b.t === 'mill') {
+        const farms = b.t === 'farm' ? [b] : [...g.buildings.values()].filter((f) => f.o === me && f.t === 'farm');
+        const on = farms.every((f) => f.reseed);
+        out.push({ key: 'reseed', icon: ICON.reseed, name: on ? 'Auto-reseed: ON' : 'Auto-reseed: OFF', desc: 'Automatically rebuild exhausted farms (60 wood).', on, act: () => { for (const f of farms) f.reseed = !on; this.hud.dirty = true; play('click'); } });
+      }
+      out.push({ key: 'del', icon: ICON.del, name: 'Delete', act: () => { if (confirm(`Delete this ${buildingDef(b.t).name}?`)) { g.cmdDelete(me, [b.id]); this.deselect(); } } });
+      return out;
+    }
+    return out;
+  }
+
+  train(b: Building, t: UnitKey, n: number) {
+    const g = this.game!;
+    const p = g.players[g.human];
+    const block = g.trainBlock(b, t);
+    if (block) { this.hud.toast(block, 'bad', 1800); play('error'); return; }
+    const done = g.cmdTrain(g.human, b.id, t, n);
+    if (!done) {
+      const st = unitStats(p, t);
+      if (!canAfford(p, st.cost)) this.notEnough(st.cost);
+      else { this.hud.toast('Queue is full.', 'bad', 1200); play('error'); }
+    } else play('click');
+  }
+
+  // ------------------------------------------------------------------ save / load
+
+  saveTo(key: string): boolean {
+    if (!this.game) return false;
+    try {
+      const data = this.game.save();
+      const meta = { t: Date.now(), civ: this.game.players[this.game.human].civ, time: this.game.time, map: this.game.settings.mapType, age: this.game.players[this.game.human].age };
+      localStorage.setItem(key, JSON.stringify({ meta, data }));
+      return true;
+    } catch (e) {
+      console.warn('save failed', e);
+      return false;
+    }
+  }
+
+  loadFrom(key: string): boolean {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return false;
+      const { data } = JSON.parse(raw) as { data: SaveData };
+      this.start(data.settings, data);
+      return true;
+    } catch (e) {
+      console.warn('load failed', e);
+      alert('This save could not be loaded.');
+      return false;
+    }
+  }
+
+  saveMeta(key: string): { t: number; civ: string; time: number; map: string; age: number } | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const i = raw.indexOf('"data"');
+      const metaStr = raw.slice(0, i).replace(/^\{"meta":/, '').replace(/,$/, '');
+      return JSON.parse(metaStr);
+    } catch { return null; }
+  }
+
+  ageName() {
+    const g = this.game!;
+    return AGE_NAMES[g.players[g.human].age];
+  }
+}
+
+export function unitStatLine(st: ReturnType<typeof unitStats>, ranged: boolean) {
+  return `\nHP ${st.hp} · Attack ${Math.round(st.atk)} · Armour ${st.armorM}/${st.armorP}${ranged ? ` · Range ${st.range}` : ''}`;
+}
+
+export function isTouch() {
+  return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+}
+
+function defaultQuality(): Quality {
+  const mobile = isTouch();
+  const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? 4;
+  if (mobile && mem <= 3) return 'low';
+  if (mobile) return 'medium';
+  return 'high';
+}
