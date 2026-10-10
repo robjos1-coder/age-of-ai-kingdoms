@@ -37,6 +37,8 @@ const GLSL = /* glsl */ `
 attribute float aBone;
 attribute float aTag;
 attribute vec4 aAnim;
+/** previous clip, its phase, previous mount clip, blend weight of the current pose (1 = no blend) */
+attribute vec4 aAnimB;
 attribute vec2 aShow;
 uniform vec3 uPiv[${NUM_BONES}];
 uniform float uMounted;
@@ -52,13 +54,20 @@ mat3 rz(float a){ float c = cos(a), s = sin(a); return mat3(c,s,0., -s,c,0., 0.,
 void rotAbout(inout vec3 p, inout vec3 n, vec3 piv, mat3 R){ p = R * (p - piv) + piv; n = R * n; }
 
 struct HP {
-  float bob; float lean; float twist; float hz; float hy;
+  float bob; float lean; float twist; float hz; float hy; float roll;
   float sR; float aR; float eR; float wR;
   float sL; float aL; float eL; float wL;
   float tL; float kL; float tR; float kR; float cape;
 };
 
-HP zeroHP(){ return HP(0.,0.,0.,0.,0., 0.,0.,0.,0., 0.,0.,0.,0., 0.,0.,0.,0., 0.); }
+HP zeroHP(){ return HP(0.,0.,0.,0.,0.,0., 0.,0.,0.,0., 0.,0.,0.,0., 0.,0.,0.,0., 0.); }
+
+HP mixHP(HP a, HP b, float w){
+  return HP(mix(a.bob,b.bob,w), mix(a.lean,b.lean,w), mix(a.twist,b.twist,w), mix(a.hz,b.hz,w), mix(a.hy,b.hy,w), mix(a.roll,b.roll,w),
+    mix(a.sR,b.sR,w), mix(a.aR,b.aR,w), mix(a.eR,b.eR,w), mix(a.wR,b.wR,w),
+    mix(a.sL,b.sL,w), mix(a.aL,b.aL,w), mix(a.eL,b.eL,w), mix(a.wL,b.wL,w),
+    mix(a.tL,b.tL,w), mix(a.kL,b.kL,w), mix(a.tR,b.tR,w), mix(a.kR,b.kR,w), mix(a.cape,b.cape,w));
+}
 
 float seq3(float h, float w, float s, float t){
   float k1 = smoothstep(0., .42, t), k2 = smoothstep(.42, .56, t), k3 = smoothstep(.64, 1., t);
@@ -78,15 +87,25 @@ void holdPose(inout HP h, float st){
 }
 
 void walkLegs(inout HP h, float t, float armAmp){
-  float s = sin(TAU * t), c = cos(TAU * t);
-  h.tL = .5 * s;  h.tR = -.5 * s;
-  h.kL = -.1 - .85 * max(0., c);
-  h.kR = -.1 - .85 * max(0., -c);
+  float w = TAU * t;
+  float s = sin(w), c = cos(w);
+  // thighs: longer forward reach than back swing
+  h.tL = s > 0. ? .56 * s : .42 * s;
+  h.tR = -s > 0. ? -.56 * s : -.42 * s;
+  // knees lift on the forward swing, soften slightly on heel strike
+  h.kL = -.12 - .95 * max(0., c) * max(0., c + .2) - .12 * max(0., -s);
+  h.kR = -.12 - .95 * max(0., -c) * max(0., -c + .2) - .12 * max(0., s);
+  // arms counter-swing; elbows lag behind and bend more going forward
+  float sl = sin(w - .35);
   h.sR += armAmp * s; h.sL -= armAmp * s;
-  h.eR += armAmp * .4 * max(0., s); h.eL += armAmp * .4 * max(0., -s);
-  h.bob = .016 * (1. - abs(s)) - .008;
-  h.twist += .1 * s; h.lean += .07; h.hy -= .05 * s;
-  h.cape += .3 + .12 * abs(s);
+  h.eR += armAmp * (.35 + .55 * max(0., sl)); h.eL += armAmp * (.35 + .55 * max(0., -sl));
+  h.aR += .06; h.aL += .06;
+  // body: double-frequency bob, hip sway, shoulder counter-twist, steady head
+  h.bob = .016 * (1. - abs(s)) - .009;
+  h.roll = .045 * s;
+  h.twist += .12 * s; h.lean += .08 + .02 * cos(2. * w);
+  h.hy -= .09 * s; h.hz += .03 * cos(2. * w);
+  h.cape += .32 + .12 * abs(s);
 }
 
 HP hpose(float clip, float t, float st){
@@ -96,8 +115,11 @@ HP hpose(float clip, float t, float st){
   bool armed = st > .5;
   if (clip < .5) {                       // IDLE
     float br = sin(TAU * t);
-    h.bob = .004 * br; h.lean = .01 * br;
-    h.sR += .035 * br; h.sL += .035 * br;
+    float shift = smoothstep(-.4, .4, sin(TAU * t * .17));   // slow weight shift between legs
+    h.roll = .035 * (shift * 2. - 1.);
+    h.tL = .06 * shift; h.kL = -.14 * shift; h.tR = .06 * (1. - shift); h.kR = -.14 * (1. - shift);
+    h.bob = .004 * br - .006; h.lean = .01 * br + .015;
+    h.sR += .035 * br; h.sL += .035 * br; h.eR += .05; h.eL += .05;
     h.hy = .45 * sin(TAU * t * .21) * smoothstep(.3, .9, sin(TAU * t * .13));
     h.hz = .06 * sin(TAU * t * .5);
     h.cape = .08 + .05 * br;
@@ -200,11 +222,17 @@ void humanChain(inout vec3 p, inout vec3 n, int b, HP h){
   if (b == 12 || b == 13) rotAbout(p, n, uPiv[12], rz(h.tR) * rx(-ma));
   if (b == 3) rotAbout(p, n, uPiv[3], ry(h.hy) * rz(-h.hz));
   if (b == 14) rotAbout(p, n, uPiv[14], rz(h.cape));
-  if ((b >= 2 && b <= 9) || b == 14) rotAbout(p, n, uPiv[2], ry(h.twist) * rz(-h.lean));
+  if ((b >= 2 && b <= 9) || b == 14) rotAbout(p, n, uPiv[2], ry(h.twist) * rz(-h.lean) * rx(h.roll));
+  if (b == 1) rotAbout(p, n, uPiv[1], rx(-h.roll * .6));
   if (b >= 1 && b <= 9 || b == 14) p.y += h.bob;
 }
 
 struct QP { float bob; float pitch; float neck; float tail; float fl; float fr; float bl; float br; float flk; float frk; float blk; float brk; };
+
+QP mixQP(QP a, QP b, float w){
+  return QP(mix(a.bob,b.bob,w), mix(a.pitch,b.pitch,w), mix(a.neck,b.neck,w), mix(a.tail,b.tail,w), mix(a.fl,b.fl,w), mix(a.fr,b.fr,w), mix(a.bl,b.bl,w), mix(a.br,b.br,w),
+    mix(a.flk,b.flk,w), mix(a.frk,b.frk,w), mix(a.blk,b.blk,w), mix(a.brk,b.brk,w));
+}
 
 QP qpose(float clip, float t){
   QP q = QP(0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.);
@@ -253,15 +281,18 @@ void rigPose(inout vec3 p, inout vec3 n){
   int b = int(aBone + .5);
   if (uQuad > .5) {
     QP q = qpose(aAnim.x, aAnim.y);
+    if (aAnimB.w < .999) q = mixQP(qpose(aAnimB.x, aAnimB.y), q, aAnimB.w);
     if (b >= 16) quadChain(p, n, b, q);
     return;
   }
   float st = uStyle;
   if (st < .5 && aShow.x > .5 && aShow.x < 9.5) st = 7.;
   HP h = hpose(aAnim.x, aAnim.y, st);
+  if (aAnimB.w < .999) h = mixHP(hpose(aAnimB.x, aAnimB.y, st), h, aAnimB.w);
   if (b > 0 && b < 16) humanChain(p, n, b, h);
   if (uMounted > .5) {
     QP q = qpose(aAnim.z, aAnim.w);
+    if (aAnimB.w < .999) q = mixQP(qpose(aAnimB.z, aAnim.w), q, aAnimB.w);
     if (b >= 16) quadChain(p, n, b, q);
     else { rotAbout(p, n, uPiv[16], rz(q.pitch)); p.y += q.bob; }
   }

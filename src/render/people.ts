@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { MB, type Col } from './mb';
 import { BN, NUM_BONES, STYLE, type Rig } from './rig';
+import { HD_CARRY, humanHD } from './people-hd';
 
 const C = {
   skin: '#e5b18a', skin2: '#c98f66', skin3: '#9a6542', hair: '#4a3222', blond: '#d0a95e', red: '#9a4a22', black: '#26221f', grey: '#9a9a9a',
@@ -14,7 +15,9 @@ const C = {
   sheep: '#f0ece2', deer: '#a0683a', boar: '#4a3a30', wolf: '#7d7d80',
 };
 
-type Hand = ((mb: MB) => void) | null;
+type Hand = (((mb: MB) => void) & { kind?: string; len?: number }) | null;
+/** Tag an item so the high-detail renderer can draw its own version. */
+const tagged = <F extends (mb: MB) => void>(kind: string, f: F, len?: number) => Object.assign(f, { kind, len });
 
 export interface Spec {
   style: number;
@@ -51,55 +54,55 @@ function pivots(): Float32Array {
 
 // ---------------------------------------------------------------- held items (drawn at the hand pivot, pointing +X)
 
-const sword = (len = 0.3, col: Col = C.metal): Hand => (m) => {
+const sword = (len = 0.3, col: Col = C.metal): Hand => tagged('sword', (m: MB) => {
   m.box(0.03, 0.025, 0.1, C.gold, 0.035, -0.012, 0);
   m.box(len, 0.03, 0.011, col, 0.05 + len / 2, -0.012, 0);
   m.cone(0.016, 0.05, 4, col, 0.07 + len, -0.012, 0, { rz: -Math.PI / 2 });
   m.box(0.06, 0.022, 0.022, C.leather, 0.0, -0.012, 0);
   m.ball(0.018, C.gold, -0.035, -0.012, 0);
-};
-const bigSword: Hand = (m) => {
+}, len);
+const bigSword: Hand = tagged('bigSword', (m: MB) => {
   m.box(0.035, 0.03, 0.13, C.gold, 0.04, -0.012, 0);
   m.box(0.46, 0.036, 0.013, C.metal, 0.29, -0.012, 0);
   m.cone(0.02, 0.06, 4, C.metal, 0.55, -0.012, 0, { rz: -Math.PI / 2 });
   m.box(0.1, 0.024, 0.024, C.leather, -0.02, -0.012, 0);
-};
-const katana: Hand = (m) => {
+});
+const katana: Hand = tagged('katana', (m: MB) => {
   m.cyl(0.03, 0.03, 0.012, 8, C.gold, 0.03, -0.012, 0, { rz: Math.PI / 2 });
   m.box(0.36, 0.022, 0.009, C.white, 0.22, -0.006, 0, { rz: 0.06 });
   m.box(0.1, 0.022, 0.022, C.black, -0.02, -0.012, 0);
-};
-const spear = (len = 0.78, tip: Col = C.metal): Hand => (m) => {
+});
+const spear = (len = 0.78, tip: Col = C.metal): Hand => tagged('spear', (m: MB) => {
   m.cyl(0.011, 0.011, len, 5, C.wood, len * 0.22, -0.012, 0, { rz: Math.PI / 2 });
   m.cone(0.024, 0.09, 4, tip, len * 0.72 + 0.04, -0.012, 0, { rz: -Math.PI / 2 });
-};
-const lance: Hand = (m) => {
+}, len);
+const lance: Hand = tagged('lance', (m: MB) => {
   m.cyl(0.013, 0.018, 0.95, 6, C.dwood, 0.33, -0.012, 0, { rz: Math.PI / 2 });
   m.cone(0.022, 0.1, 5, C.metal, 0.85, -0.012, 0, { rz: -Math.PI / 2 });
   m.cyl(0.035, 0.012, 0.08, 6, C.metal, 0.02, -0.012, 0, { rz: Math.PI / 2 });
   m.box(0.08, 0.05, 0.005, C.team, 0.72, 0.02, 0, { team: true });
-};
-const halberd: Hand = (m) => { spear(0.85)!(m); m.box(0.07, 0.1, 0.012, C.metal, 0.6, 0.035, 0); m.box(0.04, 0.03, 0.012, C.metal, 0.6, -0.06, 0); };
-const axe = (col: Col = C.metal, len = 0.3): Hand => (m) => {
+}, 0.95);
+const halberd: Hand = tagged('halberd', (m: MB) => { spear(0.85)!(m); m.box(0.07, 0.1, 0.012, C.metal, 0.6, 0.035, 0); m.box(0.04, 0.03, 0.012, C.metal, 0.6, -0.06, 0); });
+const axe = (col: Col = C.metal, len = 0.3): Hand => tagged('axe', (m: MB) => {
   m.cyl(0.013, 0.013, len, 5, C.wood, len * 0.33, -0.012, 0, { rz: Math.PI / 2 });
   m.box(0.07, 0.1, 0.012, col, len * 0.72, 0.03, 0);
-};
-const throwingAxe: Hand = (m) => { m.cyl(0.011, 0.011, 0.17, 5, C.wood, 0.06, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.05, 0.075, 0.012, C.metal, 0.13, 0.02, 0); };
-const javelin: Hand = (m) => { m.cyl(0.008, 0.008, 0.48, 4, C.wood, 0.12, -0.012, 0, { rz: Math.PI / 2 }); m.cone(0.016, 0.05, 4, C.metal, 0.38, -0.012, 0, { rz: -Math.PI / 2 }); };
+}, len);
+const throwingAxe: Hand = tagged('throwingAxe', (m: MB) => { m.cyl(0.011, 0.011, 0.17, 5, C.wood, 0.06, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.05, 0.075, 0.012, C.metal, 0.13, 0.02, 0); });
+const javelin: Hand = tagged('javelin', (m: MB) => { m.cyl(0.008, 0.008, 0.48, 4, C.wood, 0.12, -0.012, 0, { rz: Math.PI / 2 }); m.cone(0.016, 0.05, 4, C.metal, 0.38, -0.012, 0, { rz: -Math.PI / 2 }); });
 const pick: Hand = (m) => { m.cyl(0.013, 0.013, 0.3, 5, C.wood, 0.1, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.025, 0.22, 0.02, C.dmetal, 0.23, -0.012, 0, { rz: 0.15 }); };
 const hammer: Hand = (m) => { m.cyl(0.012, 0.012, 0.22, 5, C.wood, 0.07, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.05, 0.1, 0.05, C.dmetal, 0.18, -0.012, 0); };
 const hoe: Hand = (m) => { m.cyl(0.012, 0.012, 0.4, 5, C.wood, 0.13, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.025, 0.09, 0.06, C.dmetal, 0.32, -0.05, 0); };
 const knife: Hand = (m) => { m.box(0.11, 0.02, 0.01, C.metal, 0.07, -0.012, 0); m.box(0.05, 0.025, 0.02, C.leather, 0, -0.012, 0); };
 const basket: Hand = (m) => { m.cyl(0.07, 0.05, 0.07, 8, C.straw, 0.02, -0.06, 0); m.box(0.005, 0.07, 0.1, C.straw, 0.02, -0.015, 0); };
 const rod: Hand = (m) => { m.cyl(0.008, 0.012, 0.55, 5, C.wood, 0.22, -0.012, 0, { rz: Math.PI / 2 }); m.box(0.002, 0.3, 0.002, C.linen, 0.49, -0.16, 0); };
-const staff: Hand = (m) => { m.cyl(0.013, 0.013, 0.65, 5, C.wood, 0.15, -0.012, 0, { rz: Math.PI / 2 }); m.ball(0.025, C.wood, 0.48, -0.012, 0); };
-const crossbow: Hand = (m) => {
+const staff: Hand = tagged('staff', (m: MB) => { m.cyl(0.013, 0.013, 0.65, 5, C.wood, 0.15, -0.012, 0, { rz: Math.PI / 2 }); m.ball(0.025, C.wood, 0.48, -0.012, 0); });
+const crossbow: Hand = tagged('crossbow', (m: MB) => {
   m.box(0.26, 0.035, 0.035, C.wood, 0.1, -0.012, 0);
   m.box(0.03, 0.022, 0.28, C.dwood, 0.21, 0.0, 0, { ry: 0 });
   m.box(0.002, 0.004, 0.27, C.linen, 0.16, 0.0, 0);
-};
-const gun: Hand = (m) => { m.cyl(0.016, 0.018, 0.42, 6, C.dmetal, 0.18, -0.005, 0, { rz: Math.PI / 2 }); m.box(0.16, 0.045, 0.035, C.wood, -0.04, -0.015, 0); };
-const bow = (big = false): Hand => (m) => {
+});
+const gun: Hand = tagged('gun', (m: MB) => { m.cyl(0.016, 0.018, 0.42, 6, C.dmetal, 0.18, -0.005, 0, { rz: Math.PI / 2 }); m.box(0.16, 0.045, 0.035, C.wood, -0.04, -0.015, 0); });
+const bow = (big = false): Hand => tagged('bow', (m: MB) => {
   const L = big ? 0.27 : 0.21;
   // vertical bow, curved toward +X, string toward -X
   for (const s of [-1, 1]) {
@@ -107,7 +110,7 @@ const bow = (big = false): Hand => (m) => {
     m.box(0.02, L * 0.5, 0.02, C.dwood, -0.005, s * L * 0.72, 0.0, { rz: s * 0.35 });
   }
   m.box(0.003, L * 1.95, 0.003, C.linen, -0.045, 0, 0);
-};
+}, big ? 1 : 0);
 
 // ---------------------------------------------------------------- head
 
@@ -271,6 +274,7 @@ function head(mb: MB, s: Spec, skin: Col) {
 // ---------------------------------------------------------------- human body
 
 export function human(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
+  if (mb.realistic) { humanHD(mb, s, piv, ox, oy); return; }
   const scale = mb.realistic ? HUMAN_SCALE : [1, 1, 1];
   const sp = (b: number, x: number, y: number, z: number) => { piv[b * 3] = x * scale[0] + ox; piv[b * 3 + 1] = y * scale[1] + oy; piv[b * 3 + 2] = z * scale[2]; };
   const b = s.bulk ?? 1;
@@ -407,7 +411,7 @@ function villager(mb: MB, variant: string, piv: Float32Array) {
     ? { style: STYLE.NONE, skin, hair, shirt: '#365f68', pants: '#6e5038', skirt: mb.realistic ? (k % 2 ? '#634a50' : '#485663') : k % 2 ? '#8c6844' : '#7a6a8a', head: k % 2 ? 'bun' : 'long', belt: C.team, female: true, right, left }
     : { style: STYLE.NONE, skin, hair, shirt: k % 2 ? C.linen : C.linen2, pants: k % 2 ? C.brown : '#5d5a4a', head: k % 3 === 2 ? 'straw' : 'hair', belt: C.team, beard: k % 2 ? hair : undefined, right, left };
   human(mb, spec, piv);
-  if (mb.realistic) mb.pushScale(...HUMAN_SCALE);
+  if (mb.realistic) { villagerLoadsHD(mb); return; }
   // team neckerchief so villagers read as team-coloured from afar
   mb.bone = BN.TORSO;
   mb.cyl(0.05, 0.075, 0.035, 8, C.team, 0, 0.565, 0, { team: true });
@@ -424,6 +428,23 @@ function villager(mb: MB, variant: string, piv: Float32Array) {
   mb.tag = 0;
   mb.bone = 0;
   if (mb.realistic) mb.pop();
+}
+
+function villagerLoadsHD(mb: MB) {
+  const { y, z, neck } = HD_CARRY;
+  mb.bone = BN.TORSO;
+  // team scarf so villagers read as team-coloured from afar
+  mb.cyl(0.036, 0.06, 0.03, 16, C.team, 0, neck, 0, { team: true, surface: 'cloth' });
+  mb.tag = TAG.C_WOOD;
+  for (const [dx, dy, r] of [[-0.012, 0, 0.026], [0.024, 0.006, 0.023], [0.006, 0.04, 0.024]] as const) mb.cyl(r, r, 0.28, 10, '#6b4a2d', dx, y + dy, z, { rx: Math.PI / 2, surface: 'bark' });
+  mb.tag = TAG.C_GOLD;
+  mb.ball(0.055, '#8a6a42', -0.008, y + 0.01, z, { surface: 'leather' }, 0.9); mb.ball(0.024, C.gold, 0.012, y + 0.05, z + 0.01, { surface: 'gold' });
+  mb.tag = TAG.C_STONE;
+  mb.ball(0.055, '#8a6a42', -0.008, y + 0.01, z, { surface: 'leather' }, 0.9); mb.ball(0.03, '#9a958c', 0.008, y + 0.05, z + 0.008, { surface: 'rock' });
+  mb.tag = TAG.C_FOOD;
+  mb.cyl(0.06, 0.045, 0.07, 14, C.straw, -0.008, y + 0.01, z, { surface: 'thatch' }); mb.ball(0.022, '#b02838', 0.0, y + 0.045, z + 0.012, { surface: 'skin' }); mb.ball(0.022, '#d87428', -0.02, y + 0.045, z - 0.012, { surface: 'skin' });
+  mb.tag = 0;
+  mb.bone = 0;
 }
 
 export const TAG = { AXE: 1, PICK: 2, HOE: 3, HAMMER: 4, KNIFE: 5, ROD: 6, SPEAR: 7, BASKET: 8, C_WOOD: 11, C_GOLD: 12, C_STONE: 13, C_FOOD: 14, RELIC: 15 } as const;
@@ -644,10 +665,10 @@ function animal(mb: MB, t: string, piv: Float32Array) {
           m.pushScale(1.3, 1, 1);
           m.ball(0.135, C.sheep, 0, 0.27, 0, { surface: 'wool' }, 0.8);
           m.pop();
-          for (let curl = 0; curl < 32; curl++) {
-            const a = curl * 2.399, dx = (curl % 8) / 7 * 0.27 - 0.135;
+          for (let curl = 0; curl < 16; curl++) {
+            const a = curl * 2.399, dx = (curl % 6) / 5 * 0.27 - 0.135;
             const r = 0.11 * Math.sqrt(Math.max(0.3, 1 - (dx / 0.18) ** 2));
-            m.ball(0.024, C.sheep, dx, 0.28 + Math.sin(a) * r * 0.65, Math.cos(a) * r, { surface: 'wool' }, 0.8);
+            m.bead(0.03, C.sheep, dx, 0.28 + Math.sin(a) * r * 0.65, Math.cos(a) * r, { surface: 'wool' }, 0.8);
           }
         },
         tail: (m) => m.ball(0.04, C.sheep, -0.19, 0.28, 0),

@@ -17,6 +17,7 @@ interface Batch {
   cap: number;
   shadow: boolean;
   anim?: THREE.InstancedBufferAttribute;
+  animB?: THREE.InstancedBufferAttribute;
   show?: THREE.InstancedBufferAttribute;
 }
 
@@ -46,7 +47,7 @@ export class Batches {
     const model = getModel(key, this.realistic && mat === 'lit');
     let material = this.mats[mat];
     let depth: THREE.Material | undefined;
-    let anim: THREE.InstancedBufferAttribute | undefined, show: THREE.InstancedBufferAttribute | undefined;
+    let anim: THREE.InstancedBufferAttribute | undefined, show: THREE.InstancedBufferAttribute | undefined, animB: THREE.InstancedBufferAttribute | undefined;
     if (model.rig && mat === 'lit') {
       let rm = this.rigMats.get(key);
       if (!rm) { rm = { mat: makeRigMaterial(model.rig, this.fog, this.scans, this.wind), depth: makeRigDepthMaterial(model.rig) }; this.rigMats.set(key, rm); }
@@ -54,11 +55,14 @@ export class Batches {
       depth = rm.depth;
       anim = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
       show = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+      animB = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      animB.setUsage(THREE.DynamicDrawUsage);
       anim.setUsage(THREE.DynamicDrawUsage);
       show.setUsage(THREE.DynamicDrawUsage);
       model.base.setAttribute('aAnim', anim);
       model.base.setAttribute('aShow', show);
-      if (model.team) { model.team.setAttribute('aAnim', anim); model.team.setAttribute('aShow', show); }
+      model.base.setAttribute('aAnimB', animB);
+      if (model.team) { model.team.setAttribute('aAnim', anim); model.team.setAttribute('aShow', show); model.team.setAttribute('aAnimB', animB); }
     }
     const mk = (geo: THREE.BufferGeometry) => {
       const m = new THREE.InstancedMesh(geo, material, cap);
@@ -75,7 +79,7 @@ export class Batches {
       this.scene.add(m);
       return m;
     };
-    return { key, mat, base: mk(model.base), team: model.team ? mk(model.team) : null, n: 0, cap, shadow, anim, show };
+    return { key, mat, base: mk(model.base), team: model.team ? mk(model.team) : null, n: 0, cap, shadow, anim, show, animB };
   }
 
   private get(key: string, mat: MatKind, shadow: boolean): Batch {
@@ -94,6 +98,7 @@ export class Batches {
       }
       if (b.anim && nb.anim) nb.anim.array.set(b.anim.array);
       if (b.show && nb.show) nb.show.array.set(b.show.array);
+      if (b.animB && nb.animB) nb.animB.array.set(b.animB.array);
       nb.n = b.n;
       this.scene.remove(b.base); b.base.dispose();
       if (b.team) { this.scene.remove(b.team); b.team.dispose(); }
@@ -120,7 +125,8 @@ export class Batches {
 
   /** Add an animated (rigged) instance. roll tips the model over sideways (death). */
   addRig(key: string, x: number, y: number, z: number, yaw: number, scale: number, team: THREE.Color | null, tint: THREE.Color | null,
-    clip: number, t: number, mclip: number, mt: number, show0: number, show1: number, roll = 0, shadow = true) {
+    clip: number, t: number, mclip: number, mt: number, show0: number, show1: number, roll = 0, shadow = true,
+    pclip = clip, pt = t, pmclip = mclip, blend = 1) {
     const b = this.get(key, 'lit', shadow);
     _p.set(x, y, z);
     _e.set(roll, yaw, 0, 'YXZ');
@@ -134,6 +140,8 @@ export class Batches {
       a[i * 4] = clip; a[i * 4 + 1] = t; a[i * 4 + 2] = mclip; a[i * 4 + 3] = mt;
       const sh = b.show!.array as Float32Array;
       sh[i * 2] = show0; sh[i * 2 + 1] = show1;
+      const ab = b.animB!.array as Float32Array;
+      ab[i * 4] = pclip; ab[i * 4 + 1] = pt; ab[i * 4 + 2] = pmclip; ab[i * 4 + 3] = blend;
     }
   }
 
@@ -166,7 +174,7 @@ export class Batches {
         b.base.instanceMatrix.needsUpdate = true;
         b.base.instanceColor!.needsUpdate = true;
       }
-      if (b.anim && b.n) { b.anim.needsUpdate = true; b.show!.needsUpdate = true; }
+      if (b.anim && b.n) { b.anim.needsUpdate = true; b.show!.needsUpdate = true; b.animB!.needsUpdate = true; }
       if (b.team) {
         b.team.count = b.n;
         b.team.visible = b.n > 0;

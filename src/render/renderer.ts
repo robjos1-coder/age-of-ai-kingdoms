@@ -82,7 +82,7 @@ export class Renderer {
   yaw = Math.PI / 4;
   elev = 0.72;
   zoom = 20;
-  minZoom = 7;
+  minZoom = 4.5;
   maxZoom = 52;
   width = 1;
   height = 1;
@@ -220,7 +220,7 @@ export class Renderer {
     this.hemi.groundColor.set(this.realism ? '#56622f' : '#5a4a32');
     this.sun.intensity = this.realism ? 3.4 : 2.4;
     this.sun.color.set(this.realism ? '#ffe0b2' : '#fff1d6');
-    this.scene.environmentIntensity = 0.42;
+    this.scene.environmentIntensity = 0.6;
     const sm = this.shadowResolution();
     if (this.sun.shadow.map && this.sun.shadow.mapSize.x !== sm) {
       this.sun.shadow.map.dispose();
@@ -493,11 +493,14 @@ export class Renderer {
   // ------------------------------------------------------------------ skeletal animation selection
 
   private walkPh = new Map<number, { ph: number; x: number; y: number }>();
+  private animState = new Map<number, { clip: number; mclip: number; t: number; pclip: number; pt: number; pmclip: number; at: number }>();
 
   /** Rigged model key for a unit (villagers come in several looks). */
   rigKey(u: Unit) {
-    if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${u.id % 3}`;
-    return `r:${u.t}:`;
+    // realistic characters swap to a lighter model beyond close-up zoom (or always on low quality)
+    const lod = this.realism && (this.zoom > 9.5 || this.quality === 'low') ? '@1' : '';
+    if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${u.id % 3}${lod}`;
+    return `r:${u.t}:${lod}`;
   }
 
   private animFor(u: Unit, x: number, y: number) {
@@ -558,7 +561,19 @@ export class Renderer {
       }
     }
     if (this.walkPh.size > 4000) this.walkPh.clear();
-    return { key: this.rigKey(u), clip, t, mclip, mt, s0, s1, roll, sink };
+    // cross-fade between clips so state changes never pop
+    let st = this.animState.get(u.id);
+    if (!st) { st = { clip, mclip, t, pclip: clip, pt: t, pmclip: mclip, at: -99 }; this.animState.set(u.id, st); }
+    if (st.clip !== clip || st.mclip !== mclip) {
+      st.pclip = st.clip; st.pt = st.t; st.pmclip = st.mclip; st.at = this.time;
+      st.clip = clip; st.mclip = mclip;
+    }
+    st.t = t;
+    const fast = clip === CLIP.SWING || clip === CLIP.THRUST || clip === CLIP.THROW || clip === CLIP.DEAD || (quad && clip === QCLIP.ATTACK);
+    const k = Math.min(1, (this.time - st.at) / (fast ? 0.09 : 0.24));
+    const blend = k * k * (3 - 2 * k);
+    if (this.animState.size > 4000) this.animState.clear();
+    return { key: this.rigKey(u), clip, t, mclip, mt, s0, s1, roll, sink, pclip: st.pclip, pt: st.pt, pmclip: st.pmclip, blend };
   }
 
   private attackClip(u: Unit): number {
@@ -779,7 +794,7 @@ export class Renderer {
       if (RIGGED.has(u.t)) {
         const an = this.animFor(u, x, y);
         key = an.key;
-        B.addRig(key, x, h - an.sink, y, -u.a, sc, team, tint, an.clip, an.t, an.mclip, an.mt, an.s0, an.s1, an.roll, u.dead === undefined);
+        B.addRig(key, x, h - an.sink, y, -u.a, sc, team, tint, an.clip, an.t, an.mclip, an.mt, an.s0, an.s1, an.roll, u.dead === undefined, an.pclip, an.pt, an.pmclip, an.blend);
       } else {
         key = this.unitKey(u, alpha);
         let pitch = 0;
@@ -934,6 +949,9 @@ export class Renderer {
         }
         c.setAttribute('aAnim', new THREE.BufferAttribute(an, 4));
         c.setAttribute('aShow', new THREE.BufferAttribute(sh, 2));
+        const ab = new Float32Array(n * 4);
+        for (let i = 0; i < n; i++) ab[i * 4 + 3] = 1;
+        c.setAttribute('aAnimB', new THREE.BufferAttribute(ab, 4));
         return c;
       };
       base = prep(m.base);

@@ -118,7 +118,7 @@ export class MB {
   }
 
   cyl(rTop: number, rBot: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
-    return this.add(cylGeo(rTop, rBot, this.realistic ? Math.max(16, seg * 2) : seg), color, x, y, z, o, 1, h, 1);
+    return this.add(cylGeo(rTop, rBot, this.realistic ? Math.max(10, Math.min(16, Math.round(seg * 1.5))) : seg), color, x, y, z, o, 1, h, 1);
   }
 
   cylB(rTop: number, rBot: number, h: number, seg: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}) {
@@ -135,6 +135,11 @@ export class MB {
 
   ball(r: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}, sy = 1, detail = 0) {
     return this.add(this.realistic ? SPHERE : detail ? ICO1 : ICO0, color, x, y, z, o, r, r * sy, r);
+  }
+
+  /** Low-poly sphere for small repeated details. */
+  bead(r: number, color: Col, x = 0, y = 0, z = 0, o: PieceOpts = {}, sy = 1) {
+    return this.add(BEAD, color, x, y, z, o, r, r * sy, r);
   }
 
   /** Square pyramid roof, bottom at y. */
@@ -191,7 +196,8 @@ function emptyGeo() {
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const WHITE = new THREE.Color(1, 1, 1);
-const SPHERE = new THREE.SphereGeometry(1, 16, 10);
+const SPHERE = new THREE.SphereGeometry(1, 12, 8);
+const BEAD = new THREE.SphereGeometry(1, 7, 5);
 const roundCache = new Map<string, THREE.BufferGeometry>();
 function roundedBox(w: number, h: number, d: number) {
   const key = `${w}|${h}|${d}`;

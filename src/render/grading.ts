@@ -12,7 +12,7 @@ vec3 CustomToneMapping( vec3 color ) {
   // work in an approximately perceptual space for grading
   vec3 g = sqrt(c);
   float l = dot(g, vec3(0.2126, 0.7152, 0.0722));
-  g = mix(vec3(l), g, 1.2);                                   // saturation
+  g = mix(vec3(l), g, 1.13);                                  // saturation
   g = (g - 0.5) * 1.07 + 0.5;                                 // contrast
   g += vec3(0.022, 0.011, -0.018) * smoothstep(0.45, 0.95, l); // warm highlights
   g += vec3(-0.012, 0.004, 0.024) * (1.0 - smoothstep(0.05, 0.45, l)); // cool shadows

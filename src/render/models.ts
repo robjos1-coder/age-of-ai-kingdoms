@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { MB, type Col } from './mb';
 import { buildRigged } from './people';
+import { setHDLod } from './people-hd';
 import type { Rig } from './rig';
 import { realisticTree, realisticDeco, realisticDeposit, detailBuilding, detailShip, detailSiege } from './realism-models';
 
@@ -24,8 +25,11 @@ export function getModel(key: string, realistic = false): ModelGeo {
   const mb = new MB(realistic, context);
   let rig: Rig | undefined;
   if (key.startsWith('r:')) {
-    const [, t, v] = key.split(':');
+    const [, t, raw] = key.split(':');
+    const [v, lod] = (raw ?? '').split('@');
+    setHDLod(+(lod ?? 0));
     rig = buildRigged(mb, t, v ?? '');
+    setHDLod(0);
   } else buildModel(mb, key);
   const g = mb.build();
   const bb = g.base.boundingBox!;

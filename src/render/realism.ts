@@ -125,12 +125,12 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
     `)
     .replace('#include <roughnessmap_fragment>', `
       float roughnessFactor = roughness * scanProperties.g;
-      if (abs(vSurface - 9.0) < 0.5) roughnessFactor = max(0.27, roughnessFactor * 0.6);
+      if (abs(vSurface - 9.0) < 0.5) roughnessFactor = clamp(roughnessFactor * 0.55, 0.32, 0.55);
       if (vSurface > 14.5) roughnessFactor = 0.3;
       if (abs(vSurface - 13.0) < 0.5) roughnessFactor = 0.66;
     `)
     .replace('#include <metalnessmap_fragment>', `
-      float metalnessFactor = abs(vSurface - 9.0) < 0.5 ? 0.82 : vSurface > 14.5 ? 0.85 : 0.0;
+      float metalnessFactor = abs(vSurface - 9.0) < 0.5 ? 0.45 : vSurface > 14.5 ? 0.7 : 0.0;
     `)
     .replace('#include <normal_fragment_maps>', `
       vec3 mapN = scanSample(scanNormal, vScanUv, floor(vSurface + 0.5), vec2(4.0)).xyz * 2.0 - 1.0;
@@ -193,7 +193,7 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
         vec3 groundAlbedo = groundScan(scanColor, terrainUv, weights, snow, rock);
         // Meadow pigment remains legible at the wide RTS zoom; leave paths and
         // sand neutral, retaining the photographic grass's local variation.
-        groundAlbedo *= mix(vec3(1.0), vec3(0.5, 0.98, 0.36), weights.r * mix(0.4, 0.95, lushGround) * (1.0 - rock));
+        groundAlbedo *= mix(vec3(1.0), vec3(0.5, 0.84, 0.36), weights.r * mix(0.4, 0.9, lushGround) * (1.0 - rock));
         groundAlbedo *= mix(vec3(1.0), vec3(1.08, 0.98, 0.86), weights.g * 0.6);
         float macro = sin(vGroundPos.x * 0.23 + sin(vGroundPos.z * 0.17)) * sin(vGroundPos.z * 0.29);
         groundAlbedo *= 0.94 + macro * 0.08;
