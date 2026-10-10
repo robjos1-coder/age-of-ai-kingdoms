@@ -23,6 +23,7 @@ export class Hud {
   private miniBase: ImageData | null = null;
   private miniCanvas: HTMLCanvasElement | null = null;
   private tipFor: string | null = null;
+  private tipTimer = 0;
   private infoExpanded = false;
   private selectionKey = '';
 
@@ -239,6 +240,7 @@ export class Hud {
     const keys = cmds.map((c) => c.key).join(',');
     if (keys !== this.cmdKeys) {
       this.cmdKeys = keys;
+      this.hideTip();
       box.innerHTML = '';
       this.cmdEls = cmds.map((c, i) => {
         const el = document.createElement('button');
@@ -268,7 +270,7 @@ export class Hud {
     });
     if (this.tipFor) {
       const c = cmds.find((x) => x.key === this.tipFor);
-      if (c) this.showTip(c, null);
+      if (c) this.showTip(c, null, 0);
     }
   }
 
@@ -282,16 +284,17 @@ export class Hud {
         timer = window.setTimeout(() => {
           longFired = true;
           const c = this.cmds[i];
-          if (c) this.showTip(c, el);
+          if (c) this.showTip(c, el, 2200);
           if (navigator.vibrate) navigator.vibrate(15);
-        }, 420);
+        }, 500);
       }
     });
     el.addEventListener('pointerup', (e) => {
       e.stopPropagation();
       clearTimeout(timer);
-      if (longFired) { setTimeout(() => this.hideTip(), 1400); return; }
+      if (longFired) return; // the long-press tip hides itself
     });
+    el.addEventListener('pointercancel', () => clearTimeout(timer));
     el.addEventListener('pointerleave', () => { clearTimeout(timer); if (!longFired) this.hideTip(); });
     el.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { const c = this.cmds[i]; if (c) this.showTip(c, el); } });
     el.addEventListener('click', (e) => {
@@ -318,19 +321,28 @@ export class Hud {
     return true;
   }
 
-  private showTip(c: Cmd, anchor: HTMLElement | null) {
+  /** autoHide: ms until the tip closes by itself (touch), 0 = keep the current timer, -1 = stay (mouse hover). */
+  private showTip(c: Cmd, anchor: HTMLElement | null, autoHide = -1) {
     const tip = $('tooltip');
     this.tipFor = c.key;
+    if (autoHide !== 0) clearTimeout(this.tipTimer);
+    if (autoHide > 0) this.tipTimer = window.setTimeout(() => this.hideTip(), autoHide);
     const cost = c.cost ? `<div class="cost">${costHtml(c.cost, this.app)}</div>` : '';
     tip.innerHTML = `<b>${c.name}</b>${cost}${c.desc ? `<div class="desc">${c.desc.replace(/\n/g, '<br>')}</div>` : ''}${c.disabled ? `<div class="why">${c.disabled}</div>` : ''}`;
     tip.classList.remove('hidden');
     if (anchor) {
+      // Sit above the whole command panel so the tip never covers another button.
       const r = anchor.getBoundingClientRect();
+      const panel = (anchor.closest('.cmd-slot')?.parentElement ?? anchor).getBoundingClientRect();
       const tw = tip.offsetWidth, th = tip.offsetHeight;
       let x = r.left + r.width / 2 - tw / 2;
       x = Math.max(6, Math.min(window.innerWidth - tw - 6, x));
-      let y = r.top - th - 8;
-      if (y < 4) y = r.bottom + 8;
+      let y = panel.top - th - 8;
+      if (y < 4) {
+        // no room above (short landscape screens): beside the panel instead
+        y = Math.max(4, panel.bottom - th);
+        x = panel.left - tw - 8 >= 6 ? panel.left - tw - 8 : Math.min(window.innerWidth - tw - 6, panel.right + 8);
+      }
       tip.style.left = x + 'px';
       tip.style.top = y + 'px';
     }
@@ -338,6 +350,7 @@ export class Hud {
 
   hideTip() {
     this.tipFor = null;
+    clearTimeout(this.tipTimer);
     $('tooltip').classList.add('hidden');
   }
 

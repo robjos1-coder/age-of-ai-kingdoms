@@ -203,7 +203,10 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
         vec3 groundAlbedo = groundScan(scanColor, terrainUv, weights, snow, rock);
         // Meadow pigment remains legible at the wide RTS zoom; leave paths and
         // sand neutral, retaining the photographic grass's local variation.
-        groundAlbedo *= mix(vec3(1.0), vec3(0.5, 0.84, 0.36), weights.r * mix(0.4, 0.9, lushGround) * (1.0 - rock));
+        // Muted, slightly darker olive so units (lighter, team-coloured) stand out against the field.
+        float meadowW = weights.r * mix(0.4, 0.9, lushGround) * (1.0 - rock);
+        groundAlbedo *= mix(vec3(1.0), vec3(0.5, 0.7, 0.36), meadowW);
+        groundAlbedo = mix(groundAlbedo, vec3(dot(groundAlbedo, vec3(0.299, 0.587, 0.114))), 0.15 * meadowW);
         groundAlbedo *= mix(vec3(1.0), vec3(1.08, 0.98, 0.86), weights.g * 0.6);
         float macro = sin(vGroundPos.x * 0.23 + sin(vGroundPos.z * 0.17)) * sin(vGroundPos.z * 0.29);
         groundAlbedo *= 0.94 + macro * 0.08;

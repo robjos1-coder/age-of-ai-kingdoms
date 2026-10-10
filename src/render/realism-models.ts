@@ -184,7 +184,7 @@ export function realisticDeco(mb: MB, type: string, variant: number): boolean {
     for (let i = 0; i < count; i++) {
       const x = (rnd() - 0.5) * 0.28, z = (rnd() - 0.5) * 0.28;
       const h = reed ? 0.24 + rnd() * 0.35 : 0.09 + rnd() * 0.14;
-      leaf(mb, x, h / 2, z, h, ['#7d9a3c', '#8fae47', '#6c8a34', '#a0b856'][i % 4], Math.PI / 2 + rnd() * 0.3, rnd() * 6.28, (rnd() - 0.5) * 0.3);
+      leaf(mb, x, h / 2, z, h, ['#5f7536', '#6b7f3d', '#55692f', '#76884a'][i % 4], Math.PI / 2 + rnd() * 0.3, rnd() * 6.28, (rnd() - 0.5) * 0.3);
       if (reed && i % 3 === 0) mb.cyl(0.01, 0.01, 0.07, 6, '#5c472b', x, h, z, { surface: 'thatch' });
     }
     if (type === 'flower') for (let i = 0; i < 3; i++) {
