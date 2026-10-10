@@ -8,6 +8,7 @@ import { getModel } from './models';
 import { MOUNTED, QUADS, RIGGED, TAG } from './people';
 import { CLIP, QCLIP, makeRigMaterial } from './rig';
 import { Terrain, WATER_Y } from './terrain';
+import './grading';
 import { RealismAssets, makeRealismMaterial } from './realism';
 
 export type Quality = 'low' | 'medium' | 'high';
@@ -55,7 +56,10 @@ export class Renderer {
   canvas: HTMLCanvasElement;
   gl: THREE.WebGLRenderer;
   scene = new THREE.Scene();
-  camera: THREE.OrthographicCamera;
+  camera: THREE.OrthographicCamera | THREE.PerspectiveCamera;
+  /** AoE4-style perspective camera (otherwise a classic orthographic view). */
+  perspective = true;
+  readonly fov = 30;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   batches: Batches;
@@ -96,7 +100,7 @@ export class Renderer {
   private iconCache = new Map<string, string>();
   biome: string;
 
-  constructor(canvas: HTMLCanvasElement, game: Game, view: ViewState, quality: Quality, realism = true, haze = true) {
+  constructor(canvas: HTMLCanvasElement, game: Game, view: ViewState, quality: Quality, realism = true, haze = true, perspective = true) {
     this.canvas = canvas;
     this.game = game;
     this.view = view;
@@ -110,7 +114,9 @@ export class Renderer {
     this.gl.shadowMap.enabled = quality !== 'low';
     this.gl.shadowMap.type = THREE.PCFShadowMap;
     this.scene.background = SKY;
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    this.perspective = perspective;
+    if (perspective) this.elev = 0.9;
+    this.camera = perspective ? new THREE.PerspectiveCamera(this.fov, 1, 1, 400) : new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
 
     this.hemi = new THREE.HemisphereLight('#dbeeff', '#5a4a32', 1.25);
     this.scene.add(this.hemi);
@@ -136,7 +142,7 @@ export class Renderer {
     this.batches = new Batches(this.scene, this.mats, this.fog, realism, this.realismAssets?.model, this.wind);
     this.batches.setShadows(quality !== 'low');
     this.biome = game.settings.mapType === 'oasis' ? 'palm' : '';
-    this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis', this.realismAssets?.ground, game.settings.mapType !== 'arabia' && game.settings.mapType !== 'oasis');
+    this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis', this.realismAssets?.ground, game.settings.mapType !== 'oasis');
     this.configureLighting();
     for (const p of game.players) this.teamColors[p.id] = new THREE.Color(p.color);
     this.resize();
@@ -168,6 +174,14 @@ export class Renderer {
     this.rebuildWorld();
   }
 
+  setPerspective(on: boolean) {
+    if (on === this.perspective) return;
+    this.perspective = on;
+    this.camera = on ? new THREE.PerspectiveCamera(this.fov, 1, 1, 400) : new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    this.elev = on ? 0.9 : 0.72;
+    this.updateCamera();
+  }
+
   setHaze(on: boolean) {
     this.haze = on;
     this.updateAtmosphere();
@@ -192,18 +206,21 @@ export class Renderer {
     this.mats.lit = lit;
     this.batches = new Batches(this.scene, this.mats, this.fog, this.realism, this.realismAssets?.model, this.wind);
     this.batches.setShadows(this.quality !== 'low');
-    this.terrain = new Terrain(this.scene, this.game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.game.settings.mapType !== 'arabia' && this.game.settings.mapType !== 'oasis');
+    this.terrain = new Terrain(this.scene, this.game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.game.settings.mapType !== 'oasis');
     this.terrain.updateFog(this.game.explored, this.game.visible);
     this.configureLighting();
   }
 
   private configureLighting() {
-    this.gl.toneMappingExposure = this.realism ? 0.92 : 1.15;
-    this.hemi.intensity = this.realism ? 0.95 : 1.25;
-    this.hemi.color.set(this.realism ? '#d9e5ee' : '#dbeeff');
-    this.hemi.groundColor.set(this.realism ? '#69604e' : '#5a4a32');
-    this.sun.intensity = this.realism ? 2.6 : 2.4;
-    this.sun.color.set(this.realism ? '#fff1dc' : '#fff1d6');
+    // Realistic mode is graded towards AoE4: warm golden sun, cool blue sky fill, rich saturation.
+    this.gl.toneMapping = this.realism ? THREE.CustomToneMapping : THREE.ACESFilmicToneMapping;
+    this.gl.toneMappingExposure = this.realism ? 1.0 : 1.15;
+    this.hemi.intensity = this.realism ? 0.85 : 1.25;
+    this.hemi.color.set(this.realism ? '#a9c9ff' : '#dbeeff');
+    this.hemi.groundColor.set(this.realism ? '#56622f' : '#5a4a32');
+    this.sun.intensity = this.realism ? 3.4 : 2.4;
+    this.sun.color.set(this.realism ? '#ffe0b2' : '#fff1d6');
+    this.scene.environmentIntensity = 0.42;
     const sm = this.shadowResolution();
     if (this.sun.shadow.map && this.sun.shadow.mapSize.x !== sm) {
       this.sun.shadow.map.dispose();
@@ -212,7 +229,7 @@ export class Renderer {
     this.sun.shadow.mapSize.set(sm, sm);
     this.sun.shadow.normalBias = this.realism ? 0.015 : 0.03;
     this.sun.shadow.radius = this.realism ? 2 : 1;
-    this.scene.background = this.realism ? new THREE.Color('#bacdd8') : SKY;
+    this.scene.background = this.realism ? new THREE.Color('#9fc1dd') : SKY;
     this.updateAtmosphere();
   }
 
@@ -252,25 +269,25 @@ export class Renderer {
     }
     const aspect = this.width / this.height;
     const halfH = this.zoom / 2;
-    this.camera.left = -halfH * aspect;
-    this.camera.right = halfH * aspect;
-    this.camera.top = halfH;
-    this.camera.bottom = -halfH;
+    let D = 80;
+    if (this.camera instanceof THREE.PerspectiveCamera) {
+      // `zoom` stays "world height visible at the target", so panning/picking maths is unchanged.
+      D = halfH / Math.tan((this.fov * Math.PI) / 360);
+      this.camera.aspect = aspect;
+      this.camera.near = Math.max(0.5, D * 0.25);
+      this.camera.far = D * 3 + 80;
+    } else {
+      this.camera.left = -halfH * aspect;
+      this.camera.right = halfH * aspect;
+      this.camera.top = halfH;
+      this.camera.bottom = -halfH;
+    }
     this.camera.updateProjectionMatrix();
-    const D = 80;
     const ce = Math.cos(this.elev), se = Math.sin(this.elev);
     const ty = this.game.grid.h(this.tx, this.tz);
     this.camera.position.set(this.tx + Math.sin(this.yaw) * ce * D, ty + se * D, this.tz + Math.cos(this.yaw) * ce * D);
     this.camera.lookAt(this.tx, ty, this.tz);
     this.camera.updateMatrixWorld();
-    // sun follows
-    const sd = new THREE.Vector3(-0.55, 1, 0.35).normalize();
-    this.sun.position.set(this.tx + sd.x * 60, ty + sd.y * 60, this.tz + sd.z * 60);
-    this.sun.target.position.set(this.tx, ty, this.tz);
-    const r = this.zoom * Math.max(1, aspect) * 0.8 + 4;
-    const sc = this.sun.shadow.camera;
-    sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 1; sc.far = 160;
-    sc.updateProjectionMatrix();
     // view bounds on ground (for culling)
     const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => this.groundAt((x * 0.5 + 0.5) * this.width, (-y * 0.5 + 0.5) * this.height, 0.4));
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -278,7 +295,20 @@ export class Renderer {
       if (!p) continue;
       x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
     }
+    if (!isFinite(x0)) { x0 = this.tx - this.zoom; x1 = this.tx + this.zoom; y0 = this.tz - this.zoom; y1 = this.tz + this.zoom; }
+    // never cull far beyond a sensible radius (perspective views reach further at the top of the screen)
+    const lim = this.zoom * 2.2 + 8;
+    x0 = Math.max(x0, this.tx - lim); x1 = Math.min(x1, this.tx + lim); y0 = Math.max(y0, this.tz - lim); y1 = Math.min(y1, this.tz + lim);
     this.bounds = { x0: x0 - 4, y0: y0 - 4, x1: x1 + 4, y1: y1 + 6 };
+    // sun follows the visible area: a lowish warm sun gives long, readable shadows
+    const sd = this.realism ? new THREE.Vector3(-0.62, 0.74, 0.42).normalize() : new THREE.Vector3(-0.55, 1, 0.35).normalize();
+    const scx = (x0 + x1) / 2, scz = (y0 + y1) / 2;
+    this.sun.position.set(scx + sd.x * 70, ty + sd.y * 70, scz + sd.z * 70);
+    this.sun.target.position.set(scx, ty, scz);
+    const r = Math.max(x1 - x0, y1 - y0) * 0.62 + 3;
+    const sc = this.sun.shadow.camera;
+    sc.left = -r; sc.right = r; sc.top = r; sc.bottom = -r; sc.near = 1; sc.far = 180;
+    sc.updateProjectionMatrix();
   }
 
   pan(dxPx: number, dyPx: number) {

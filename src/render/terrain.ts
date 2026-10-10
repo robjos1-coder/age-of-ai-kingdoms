@@ -108,6 +108,9 @@ export class Terrain {
         const t = desert && grid.terrain[i] === T_GRASS ? T_SAND : grid.terrain[i];
         const channel = t === T_DIRT ? 1 : t === T_FOREST ? 3 : [T_SAND, T_SHALLOW, T_WATER].includes(t) ? 2 : t === T_SNOW ? -1 : 0;
         if (channel >= 0) mask[i * 4 + channel] = 255;
+        // AoE4 look: dirt reads as trodden patches inside living meadow, forest floor stays mossy
+        if (!desert && t === T_DIRT) { mask[i * 4 + 1] = 95; mask[i * 4] = 160; }
+        if (!desert && t === T_FOREST) { mask[i * 4 + 3] = 170; mask[i * 4] = 85; }
       }
       this.biomeMap = new THREE.DataTexture(mask, S, S);
       this.biomeMap.magFilter = this.biomeMap.minFilter = THREE.LinearFilter;

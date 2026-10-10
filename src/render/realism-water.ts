@@ -11,7 +11,7 @@ export class RealisticWater {
   mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshPhysicalMaterial>;
   private height: THREE.DataTexture;
   private target = new THREE.WebGLRenderTarget(768, 768, { type: THREE.HalfFloatType });
-  private mirror = new THREE.OrthographicCamera();
+  private mirror: THREE.OrthographicCamera | THREE.PerspectiveCamera = new THREE.OrthographicCamera();
   private projection = new THREE.Matrix4();
   private time = { value: 0 };
   private reflected = { value: 0 };
@@ -93,13 +93,14 @@ export class RealisticWater {
 
   animate(time: number) { this.time.value = time; }
 
-  reflect(gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.OrthographicCamera, quality: Quality) {
+  reflect(gl: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.OrthographicCamera | THREE.PerspectiveCamera, quality: Quality) {
     if (quality === 'low') { this.reflected.value = 0; return; }
     if (this.time.value - this.lastReflection < (quality === 'high' ? 0.08 : 0.16)) return;
     this.lastReflection = this.time.value;
     const resolution = quality === 'high' ? 768 : 384;
     if (this.target.width !== resolution) this.target.setSize(resolution, resolution);
-    this.mirror.copy(camera);
+    if (this.mirror.type !== camera.type) this.mirror = camera instanceof THREE.PerspectiveCamera ? new THREE.PerspectiveCamera() : new THREE.OrthographicCamera();
+    (this.mirror as THREE.Camera).copy(camera);
     this.mirror.position.y = 2 * LEVEL - camera.position.y;
     const look = camera.getWorldDirection(new THREE.Vector3());
     look.y *= -1;
