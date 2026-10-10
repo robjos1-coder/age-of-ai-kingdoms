@@ -302,3 +302,16 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
   #minimap-wrap { width: 96px; height: 96px; }
 }
 body.panel-collapsed #info, body.panel-collapsed #cmds { display: none; }
+
+/* ------------------------------------------------------------ performance overlay */
+#perf {
+  position: fixed; z-index: 35; left: calc(6px + var(--safe-l)); top: calc(46px + var(--safe-t));
+  padding: 4px 8px; border-radius: 8px; background: #000b; border: 1px solid #fff3;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #e8e8e8;
+  pointer-events: auto; max-width: calc(100vw - 70px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#perf b { font-weight: 700; }
+#perf.good b { color: #7be07a; }
+#perf.mid b { color: #ffd060; }
+#perf.bad b { color: #ff6a5a; }
+@media (orientation: portrait) { #perf { top: calc(166px + var(--safe-t)); } }

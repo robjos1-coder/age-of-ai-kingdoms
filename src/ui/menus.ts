@@ -264,6 +264,7 @@ export class Menus {
       <div class="grid2">
         <label class="f">Graphics quality<select id="o-q"><option value="low">Low (fast, no shadows)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
         <label class="f"><span><input type="checkbox" id="o-realism"> Realistic graphics</span><small class="sub">Detailed models, photographic textures, natural lighting and reflective water.</small></label>
+        <label class="f"><span><input type="checkbox" id="o-fps"> Show FPS</span><small class="sub">Frame rate, frame time, draw calls and triangles on screen. Tap the counter to hide it.</small></label>
         <label class="f"><span><input type="checkbox" id="o-persp"> Perspective camera</span><small class="sub">AoE4-style camera with depth. Turn off for a classic flat isometric view.</small></label>
         <label class="f"><span><input type="checkbox" id="o-haze"> Atmospheric haze</span><small class="sub">Soft distance haze in realistic graphics.</small></label>
         <label class="f">Game speed<select id="o-speed"><option value="1">Slow (1.0×)</option><option value="1.5">Normal (1.5×)</option><option value="1.7">AoE2 Normal (1.7×)</option><option value="2">Fast (2.0×)</option><option value="3">Very fast (3.0×)</option></select></label>
@@ -281,6 +282,7 @@ export class Menus {
     q<HTMLInputElement>('#o-realism').checked = pr.realism;
     q<HTMLInputElement>('#o-haze').checked = pr.haze;
     q<HTMLInputElement>('#o-persp').checked = pr.perspective;
+    q<HTMLInputElement>('#o-fps').checked = pr.showFps;
     q<HTMLSelectElement>('#o-speed').value = String(pr.speed);
     q<HTMLInputElement>('#o-sfx').value = String(pr.sfx);
     q<HTMLInputElement>('#o-music').value = String(pr.music);
@@ -294,6 +296,8 @@ export class Menus {
       pr.realism = q<HTMLInputElement>('#o-realism').checked;
       pr.haze = q<HTMLInputElement>('#o-haze').checked;
       pr.perspective = q<HTMLInputElement>('#o-persp').checked;
+      pr.showFps = q<HTMLInputElement>('#o-fps').checked;
+      if (!pr.showFps) this.app.hud.hidePerf();
       pr.speed = +q<HTMLSelectElement>('#o-speed').value;
       pr.sfx = +q<HTMLInputElement>('#o-sfx').value;
       pr.music = +q<HTMLInputElement>('#o-music').value;

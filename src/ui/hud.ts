@@ -98,7 +98,27 @@ export class Hud {
     this.initMinimap();
   }
 
+  /** Performance overlay (Settings → Show FPS). */
+  setPerf(line1: string, line2: string, level: 'good' | 'mid' | 'bad') {
+    let el = document.getElementById('perf');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'perf';
+      el.title = 'Tap to hide (Settings → Show FPS)';
+      el.addEventListener('click', () => { this.app.prefs.showFps = false; this.app.savePrefs(); this.hidePerf(); });
+      document.body.appendChild(el);
+    }
+    el.className = level;
+    el.innerHTML = `<b>${line1}</b><br>${line2}`;
+    el.classList.remove('hidden');
+  }
+
+  hidePerf() {
+    document.getElementById('perf')?.classList.add('hidden');
+  }
+
   show(on: boolean) {
+    if (!on) this.hidePerf();
     for (const id of ['topbar', 'sidebtns', 'bottom']) $(id).classList.toggle('hidden', !on);
     if (!on) { this.closePopouts(); $('modebar').classList.add('hidden'); $('tooltip').classList.add('hidden'); }
   }

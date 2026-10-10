@@ -40,5 +40,26 @@ export function installDebug(app: App) {
     };
     app.start(s);
   };
-  w.dbg = { app, pump, touch, tap, tapWorld, cmd, start };
+  /** Triangles drawn per frame by category (main pass + shadow pass). */
+  const breakdown = () => {
+    const r = app.renderer!;
+    const cat = (k: string) => k.startsWith('r:') ? 'units (rigged)' : k.startsWith('u:') ? 'siege & ships' : k.startsWith('tree') ? 'trees'
+      : k.startsWith('d:') ? 'grass & decorations' : k.startsWith('n:') ? 'resources' : /^(b:|found|scaffold|rubble)/.test(k) ? 'buildings' : 'effects & UI';
+    const out: Record<string, { instances: number; main: number; shadow: number; models: number }> = {};
+    const b = (r as unknown as { batches: { map: Map<string, { base: { geometry: { getAttribute(n: string): { count: number } }; castShadow: boolean; visible: boolean }; team: { geometry: { getAttribute(n: string): { count: number } } } | null; n: number }> } }).batches;
+    for (const [key, bt] of b.map) {
+      if (!bt.n) continue;
+      const tris = (bt.base.geometry.getAttribute('position').count + (bt.team ? bt.team.geometry.getAttribute('position').count : 0)) / 3;
+      const c = (out[cat(key)] ??= { instances: 0, main: 0, shadow: 0, models: 0 });
+      c.instances += bt.n; c.models++;
+      c.main += tris * bt.n;
+      if (bt.base.castShadow) c.shadow += tris * bt.n;
+    }
+    const t = (r as unknown as { terrain: { mesh: { geometry: { index: { count: number } | null } } } }).terrain;
+    out['terrain'] = { instances: 1, main: (t.mesh.geometry.index?.count ?? 0) / 3, shadow: 0, models: 1 };
+    const rows = Object.entries(out).sort((a, z) => z[1].main + z[1].shadow - a[1].main - a[1].shadow)
+      .map(([k, v]) => ({ category: k, instances: v.instances, models: v.models, mainK: Math.round(v.main / 1000), shadowK: Math.round(v.shadow / 1000) }));
+    return { rows, totalK: Math.round(rows.reduce((s, x) => s + x.mainK + x.shadowK, 0)), glInfoK: Math.round(r.gl.info.render.triangles / 1000), draws: r.gl.info.render.calls };
+  };
+  w.dbg = { app, pump, touch, tap, tapWorld, cmd, start, breakdown };
 }

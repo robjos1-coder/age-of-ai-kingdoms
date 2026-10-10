@@ -40,6 +40,8 @@ export interface Prefs {
   realism: boolean;
   haze: boolean;
   perspective: boolean;
+  /** On-screen FPS / performance overlay. */
+  showFps: boolean;
   sfx: number;
   music: number;
   muted: boolean;
@@ -86,7 +88,7 @@ export class App {
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
-    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
+    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, showFps: false, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
     try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
     this.hud = new Hud(this);
     this.input = new Input(this);
@@ -179,7 +181,36 @@ export class App {
     requestAnimationFrame(loop);
   }
 
+  private frameStart = 0;
+  private perf = { since: 0, frames: 0, cpu: 0, last: 0, worst: [] as number[] };
+
+  /** Rolling stats for the optional on-screen performance overlay (updated twice a second). */
+  private perfSample(now: number, cpuMs: number) {
+    const p = this.perf;
+    // a backgrounded tab / app switch is not a slow frame: restart the window after long gaps
+    if (p.last && now - p.last > 1000) { p.since = 0; p.frames = 0; p.cpu = 0; p.worst.length = 0; p.last = 0; }
+    if (p.last) p.worst.push(now - p.last);
+    p.last = now;
+    p.frames++;
+    p.cpu += cpuMs;
+    if (!p.since) { p.since = now; return; }
+    if (now - p.since < 500) return;
+    const r = this.renderer!;
+    const fps = (p.frames * 1000) / (now - p.since);
+    p.worst.sort((a, b) => a - b);
+    const p95 = p.worst[Math.floor(p.worst.length * 0.95)] ?? 0;
+    const info = r.gl.info.render;
+    const pr = r.gl.getPixelRatio();
+    this.hud.setPerf(
+      `${fps.toFixed(0)} fps · ${(1000 / fps).toFixed(1)} ms (worst ${p95.toFixed(0)}) · CPU ${(p.cpu / p.frames).toFixed(1)} ms`,
+      `${info.calls} draws · ${(info.triangles / 1e6).toFixed(2)}M tris · ${r.quality}${r.realism ? ' realistic' : ' classic'} · ${Math.round(r.width * pr)}×${Math.round(r.height * pr)}`,
+      fps < 24 ? 'bad' : fps < 45 ? 'mid' : 'good',
+    );
+    p.since = now; p.frames = 0; p.cpu = 0; p.worst.length = 0;
+  }
+
   private frame = (now: number) => {
+    this.frameStart = performance.now();
     if (!this.running || !this.game || !this.renderer) return;
     // iOS standalone resize events can precede the final canvas layout. Sync
     // before input, rendering and the minimap; unchanged sizes are a cheap no-op.
@@ -206,6 +237,7 @@ export class App {
     this.cleanSelection();
     this.updateGhost();
     const renderStart = this.graphicsStats ? performance.now() : 0;
+    const cpuStart = this.frameStart;
     this.renderer.render(this.paused ? 1 : Math.min(1, this.acc / TICK), dt);
     if (this.graphicsStats && !document.hidden) {
       if (!this.measuredSince) this.measuredSince = now;
@@ -224,6 +256,7 @@ export class App {
       this.measuredSince = 0; this.measuredFrames = 0; this.measuredRenderMs = 0;
     }
     this.hud.update(dt);
+    if (this.prefs.showFps) this.perfSample(now, performance.now() - cpuStart);
     if (g.over && !this.overShown) {
       this.overShown = true;
       setTimeout(() => this.menus.showGameOver(), 1500);
