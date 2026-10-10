@@ -454,7 +454,8 @@ export class Renderer {
 
   buildingKey(b: Building) {
     const age = this.game.players[b.o]?.age ?? 1;
-    return `b:${b.t}:${Math.max(1, Math.min(4, age))}`;
+    const tier = Math.max(1, Math.min(4, age));
+    return b.t === 'house' ? `b:house:${tier}:${b.id % 3}` : `b:${b.t}:${tier}`;
   }
 
   unitKey(u: Unit, alpha: number): string {
@@ -499,7 +500,7 @@ export class Renderer {
   rigKey(u: Unit) {
     // realistic characters swap to a lighter model beyond close-up zoom (or always on low quality)
     const lod = this.realism && (this.zoom > 9.5 || this.quality === 'low') ? '@1' : '';
-    if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${u.id % 3}${lod}`;
+    if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${lod}`;
     return `r:${u.t}:${lod}`;
   }
 
@@ -589,7 +590,7 @@ export class Renderer {
 
   /** Portrait / button icon for a unit type. */
   unitIcon(t: string, color: string, size = 96, variant = '') {
-    if (RIGGED.has(t)) return this.icon(t === 'villager' ? `r:villager:${variant || 'm0'}` : `r:${t}:`, color, size);
+    if (RIGGED.has(t)) return this.icon(t === 'villager' ? `r:villager:${variant || 'm'}` : `r:${t}:`, color, size);
     return this.icon(`u:${t}:idle:${t === 'trebuchet' ? 'packed' : ''}`, color, size);
   }
 
@@ -690,6 +691,7 @@ export class Renderer {
       const i = Math.floor(d.y) * S + Math.floor(d.x);
       if (g.grid.occ[i] || !g.explored[i]) continue;
       if (this.realism && this.quality === 'low' && i % 3 !== 0) continue;
+      if (this.realism && this.quality !== 'high' && this.zoom > 14 && d.t === 'grass' && i % 2) continue;
       B.add(`d:${d.t}:${d.v}`, d.x, g.grid.h(d.x, d.y), d.y, d.rot, d.s, d.s, d.s, null, null, 'lit', false);
     }
 
@@ -701,7 +703,8 @@ export class Renderer {
       if (n.t === 'tree') {
         if (n.amt < n.max) B.add(`n:stump:${n.v % 6}`, x, h, y, n.v);
         else {
-          const lod = this.realism ? (this.quality === 'low' || this.zoom >= 30 ? 2 : this.quality === 'medium' || this.zoom >= 14 ? 1 : 0) : 0;
+          // leafy trees only for high-quality close-ups; otherwise sculpted canopy trees (about 1/6 the triangles)
+          const lod = this.realism ? (this.quality === 'high' && this.zoom < 8 ? 0 : this.quality === 'high' && this.zoom < 11 ? 1 : 3) : 0;
           B.add(`tree:${n.v % 4}:${this.biome}:${lod}`, x, h, y, 0, 1, 1, 1, null, null, 'lit', true);
         }
       } else if (n.t === 'fish') {

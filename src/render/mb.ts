@@ -8,6 +8,8 @@ import { gableDetails, pyramidDetails } from './realism-models';
 
 const tmpM = new THREE.Matrix4();
 const tmpC = new THREE.Color();
+const tmpP = new THREE.Vector3();
+const tmpN = new THREE.Vector3();
 
 export type Col = number | string;
 
@@ -28,6 +30,8 @@ export class MB {
   }
   /** Skeleton joint that subsequently added geometry is attached to (0 = static). */
   bone = 0;
+  /** Optional normal override for foliage cards (model-space position → normal, both mutable). */
+  normalFn: ((p: THREE.Vector3, n: THREE.Vector3) => void) | null = null;
   /** Optional geometry tag (e.g. which tool / carried item); untagged = 0. */
   tag = 0;
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
@@ -79,7 +83,9 @@ export class MB {
     tmpC.set(color as THREE.ColorRepresentation);
     const surface = o.surface ?? (o.team ? 'cloth' : this.surfaces.get(color) ?? surfaceFor(color, this.context));
     const slot = SURFACE[surface];
-    if (this.realistic && !['leaf', 'skin', 'cloth', 'leather', 'wool'].includes(surface)) {
+    const card = surface === 'foliage';
+    const guv = card ? g.getAttribute('uv') : null;
+    if (this.realistic && !['leaf', 'skin', 'cloth', 'leather', 'wool', 'foliage'].includes(surface)) {
       tmpC.lerp(WHITE, surface === 'rock' ? 0.2 : surface === 'slate' ? 0.32 : surface === 'tile' ? 0.6 : surface === 'thatch' ? 0.65 : 0.8);
     }
     const density = SURFACE_SCALE[slot];
@@ -88,7 +94,12 @@ export class MB {
       const j = 1 + (this.rand() - 0.5) * this.jitter * 2;
       for (let k = 0; k < 3; k++) {
         tgt.pos.push(pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k));
-        tgt.nor.push(nor.getX(i + k), nor.getY(i + k), nor.getZ(i + k));
+        if (card && this.normalFn) {
+          tmpP.set(pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k));
+          tmpN.set(nor.getX(i + k), nor.getY(i + k), nor.getZ(i + k));
+          this.normalFn(tmpP, tmpN);
+          tgt.nor.push(tmpN.x, tmpN.y, tmpN.z);
+        } else tgt.nor.push(nor.getX(i + k), nor.getY(i + k), nor.getZ(i + k));
         tgt.col.push(tmpC.r * j, tmpC.g * j, tmpC.b * j);
         tgt.bone.push(this.bone);
         tgt.tag.push(this.tag);
@@ -99,7 +110,8 @@ export class MB {
         const p = i + k;
         const u = nx > ny && nx > nz ? pos.getZ(p) : pos.getX(p);
         const v = ny > nx && ny > nz ? pos.getZ(p) : pos.getY(p);
-        tgt.uv.push(u * density, v * density);
+        if (guv) tgt.uv.push(guv.getX(p), guv.getY(p));
+        else tgt.uv.push(u * density, v * density);
       }
     }
     if (g !== geo) g.dispose();

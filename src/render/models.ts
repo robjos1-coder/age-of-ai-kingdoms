@@ -7,6 +7,7 @@ import { buildRigged } from './people';
 import { setHDLod } from './people-hd';
 import type { Rig } from './rig';
 import { realisticTree, realisticDeco, realisticDeposit, detailBuilding, detailShip, detailSiege } from './realism-models';
+import { hdBuilding } from './buildings-hd';
 
 export interface ModelGeo {
   base: THREE.BufferGeometry;
@@ -327,7 +328,8 @@ function tower(mb: MB, r: number, h: number, st: Style, tier: number, x = 0, z =
   mb.box(0.03, 0.16, 0.08, st.win, x + r + 0.01, h * 0.7, z);
 }
 
-function buildBuilding(mb: MB, t: string, tier: number) {
+function buildBuilding(mb: MB, t: string, tier: number, variant = 0) {
+  if (mb.realistic && hdBuilding(mb, t, tier, variant)) return;
   const st = STYLES[tier];
   const stone = tier >= 3;
   if (mb.realistic) {
@@ -858,7 +860,7 @@ function buildModel(mb: MB, key: string) {
   const parts = key.split(':');
   switch (parts[0]) {
     case 'u': buildUnit(mb, parts[1], parts[2] ?? 'idle', parts[3] ?? ''); break;
-    case 'b': buildBuilding(mb, parts[1], +(parts[2] ?? 1)); break;
+    case 'b': buildBuilding(mb, parts[1], +(parts[2] ?? 1), +(parts[3] ?? 0)); break;
     case 'found': foundation(mb, +parts[1]); break;
     case 'scaffold': scaffold(mb, +parts[1], +parts[2]); break;
     case 'rubble': rubbleModel(mb, +parts[1]); break;

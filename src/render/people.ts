@@ -46,6 +46,8 @@ export interface Spec {
   quiver?: boolean;
   tunicTeam?: boolean;
   female?: boolean;
+  /** Open leather jerkin worn over the shirt (villagers). */
+  vest?: Col;
 }
 
 function pivots(): Float32Array {
@@ -407,9 +409,11 @@ function villager(mb: MB, variant: string, piv: Float32Array) {
     m.tag = 0;
   };
   const left: Hand = (m) => { m.tag = TAG.BASKET; basket!(m); m.tag = 0; };
+  void k; void skin; void hair;
+  // One look per sex, deliberately unlike any soldier: no tabards or helmets, a straw hat / white kerchief.
   const spec: Spec = fem
-    ? { style: STYLE.NONE, skin, hair, shirt: '#365f68', pants: '#6e5038', skirt: mb.realistic ? (k % 2 ? '#634a50' : '#485663') : k % 2 ? '#8c6844' : '#7a6a8a', head: k % 2 ? 'bun' : 'long', belt: C.team, female: true, right, left }
-    : { style: STYLE.NONE, skin, hair, shirt: k % 2 ? C.linen : C.linen2, pants: k % 2 ? C.brown : '#5d5a4a', head: k % 3 === 2 ? 'straw' : 'hair', belt: C.team, beard: k % 2 ? hair : undefined, right, left };
+    ? { style: STYLE.NONE, skin: C.skin, hair: '#6b4024', shirt: '#8a4f38', pants: '#5a3e2a', skirt: '#7a4430', head: mb.realistic ? 'kerchief' : 'bun', belt: C.team, female: true, right, left }
+    : { style: STYLE.NONE, skin: C.skin, hair: '#5a3a22', shirt: '#d8cdb0', pants: '#6b4a2c', vest: '#6e4a2a', head: 'straw', belt: C.team, right, left };
   human(mb, spec, piv);
   if (mb.realistic) { villagerLoadsHD(mb); return; }
   // team neckerchief so villagers read as team-coloured from afar
@@ -744,7 +748,7 @@ export function buildRigged(mb: MB, t: string, variant: string): Rig {
   const piv = pivots();
   let style: number = STYLE.NONE;
   let mounted = false, quadOnly = false;
-  if (t === 'villager') villager(mb, variant || 'm0', piv);
+  if (t === 'villager') villager(mb, variant || 'm', piv);
   else if (MOUNTED.has(t)) { style = cavalry(mb, t, piv); mounted = true; }
   else if (QUADS.has(t)) { animal(mb, t, piv); quadOnly = true; }
   else {

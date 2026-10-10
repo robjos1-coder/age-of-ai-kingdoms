@@ -3,6 +3,7 @@ import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import type { FogUniforms } from './batches';
 import { applyFogToShader } from './rig';
+import { foliageTexture } from './foliage';
 
 type Shader = THREE.WebGLProgramParametersWithUniforms;
 export interface ScanAtlas { color: THREE.Texture; normal: THREE.Texture; arm: THREE.Texture }
@@ -101,6 +102,7 @@ function uniforms(shader: Shader, atlas: ScanAtlas) {
   shader.uniforms.scanColor = { value: atlas.color };
   shader.uniforms.scanNormal = { value: atlas.normal };
   shader.uniforms.scanArm = { value: atlas.arm };
+  shader.uniforms.foliageMap = { value: foliageTexture() };
 }
 
 /** PBR atlas injection also works on the instanced skeleton shader. */
@@ -109,18 +111,25 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nattribute float aSurface;\nvarying float vSurface;\nvarying vec2 vScanUv;\nuniform float worldTime;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
-      if (aSurface > 6.5 && aSurface < 7.5) {
+      if ((aSurface > 6.5 && aSurface < 7.5) || aSurface > 15.5) {
         float sway = sin(worldTime * 1.35 + position.x * 4.2 + position.z * 3.0);
         transformed.x += sway * min(0.025, max(0.0, position.y) * 0.012);
       }`)
     .replace('#include <project_vertex>', '#include <project_vertex>\nvSurface = aSurface;\nvScanUv = uv;');
   shader.uniforms.worldTime = wind ?? { value: 0 };
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying float vSurface;\nvarying vec2 vScanUv;\n' + ATLAS_GLSL)
+    .replace('#include <common>', '#include <common>\nvarying float vSurface;\nvarying vec2 vScanUv;\nuniform sampler2D foliageMap;\n' + ATLAS_GLSL)
     .replace('#include <map_fragment>', `
+      bool foliageCard = vSurface > 15.5;
       vec4 scanAlbedo = scanSample(scanColor, vScanUv, floor(vSurface + 0.5), vec2(4.0));
-      diffuseColor.rgb *= scanAlbedo.rgb;
       vec3 scanProperties = scanSample(scanArm, vScanUv, floor(vSurface + 0.5), vec2(4.0)).rgb;
+      vec4 foliageTexel = texture2D(foliageMap, vScanUv);
+      if (foliageCard) {
+        if (foliageTexel.a < 0.45) discard;
+        scanAlbedo = vec4(foliageTexel.rgb * 1.12, 1.0);
+        scanProperties = vec3(1.0, 1.05, 0.0);
+      }
+      diffuseColor.rgb *= scanAlbedo.rgb;
       diffuseColor.rgb *= mix(0.65, 1.0, scanProperties.r);
     `)
     .replace('#include <roughnessmap_fragment>', `
@@ -135,6 +144,7 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
     .replace('#include <normal_fragment_maps>', `
       vec3 mapN = scanSample(scanNormal, vScanUv, floor(vSurface + 0.5), vec2(4.0)).xyz * 2.0 - 1.0;
       mapN.xy *= normalScale;
+      if (foliageCard) mapN = vec3(0.0, 0.0, 1.0);
       normal = normalize(tbn * mapN);
     `);
 }
@@ -145,7 +155,7 @@ export function makeRealismMaterial(atlas: ScanAtlas, fog: FogUniforms | null, w
     applyModelScans(shader, atlas, wind);
     if (fog) applyFogToShader(shader, fog);
   };
-  material.customProgramCacheKey = () => `realism-model-v1-${!!fog}`;
+  material.customProgramCacheKey = () => `realism-model-v2-${!!fog}`;
   return material;
 }
 

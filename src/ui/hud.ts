@@ -529,7 +529,7 @@ export class Hud {
   unitIconSrc(u: Unit, size: number) {
     const g = this.app.game!;
     const col = g.players[u.o]?.color ?? '#888';
-    return this.app.renderer!.unitIcon(u.t, col, size, u.t === 'villager' ? `${u.fem ? 'f' : 'm'}${u.id % 3}` : '');
+    return this.app.renderer!.unitIcon(u.t, col, size, u.t === 'villager' ? (u.fem ? 'f' : 'm') : '');
   }
 
   unitIconKey(u: Unit) {

@@ -2,6 +2,8 @@
 export const SURFACE = {
   wood: 0, stone: 1, plaster: 2, tile: 3, slate: 4, thatch: 5, bark: 6, leaf: 7,
   soil: 8, metal: 9, cloth: 10, leather: 11, wool: 12, skin: 13, rock: 14, gold: 15,
+  /** alpha-cut foliage cards: sampled from the generated foliage texture, not the scan atlas */
+  foliage: 16,
 } as const;
 export type Surface = keyof typeof SURFACE;
 
@@ -31,4 +33,4 @@ export function surfaceFor(color: string | number, context: string): Surface {
 }
 
 /** Repeats per world unit; buildings keep brick courses and timber grain at a common scale. */
-export const SURFACE_SCALE = [0.8, 1.15, 1.4, 1.0, 1.1, 1.1, 1.25, 3.0, 0.8, 3.0, 7.0, 5.0, 6.0, 8.0, 1.6, 2.0];
+export const SURFACE_SCALE = [0.8, 1.15, 1.4, 1.0, 1.1, 1.1, 1.25, 3.0, 0.8, 3.0, 7.0, 5.0, 6.0, 8.0, 1.6, 2.0, 1.0];

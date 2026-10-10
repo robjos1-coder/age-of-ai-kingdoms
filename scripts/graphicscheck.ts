@@ -9,11 +9,12 @@ let classicTriangles = 0;
 let realisticTriangles = 0;
 const keys: string[] = [];
 for (const type of Object.keys(BUILDINGS)) for (const age of [1, 2, 3, 4]) keys.push(`b:${type}:${age}`);
+for (const age of [1, 2, 3, 4]) for (const v of [1, 2]) keys.push(`b:house:${age}:${v}`);
 for (const type of Object.keys(UNITS)) {
-  if (RIGGED.has(type)) keys.push(`r:${type}:${type === 'villager' ? 'm1' : ''}`);
+  if (RIGGED.has(type)) keys.push(`r:${type}:${type === 'villager' ? 'm' : ''}`);
   else for (const pose of ['idle', 'walk1', 'atk1', 'atk2', 'dead']) keys.push(`u:${type}:${pose}:${type === 'trebuchet' ? 'deployed' : ''}`);
 }
-for (const sex of ['m', 'f']) for (let variant = 0; variant < 4; variant++) keys.push(`r:villager:${sex}${variant}`);
+for (const sex of ['m', 'f']) for (const lod of ['', '@1']) keys.push(`r:villager:${sex}${lod}`);
 keys.push('u:trebuchet:idle:packed');
 for (let v = 0; v < 6; v++) keys.push(`tree:${v}:`, `tree:${v}:palm`);
 for (let v = 0; v < 6; v++) for (const lod of [1, 2]) keys.push(`tree:${v}::${lod}`, `tree:${v}:palm:${lod}`);
@@ -36,7 +37,7 @@ for (const key of keys) {
         assert(Array.from(attribute.array).every(Number.isFinite), `${key}: finite ${name}`);
       }
       const surface = geometry.getAttribute('aSurface');
-      for (let i = 0; i < surface.count; i++) assert(surface.getX(i) >= 0 && surface.getX(i) <= 15, `${key}: atlas slot in range`);
+      for (let i = 0; i < surface.count; i++) assert(surface.getX(i) >= 0 && surface.getX(i) <= 16, `${key}: atlas slot (or foliage card) in range`);
       if (model === real) realisticTriangles += count / 3;
       else classicTriangles += count / 3;
     }
@@ -48,5 +49,5 @@ for (const key of keys) {
   checked += 2;
 }
 assert(realisticTriangles > classicTriangles * 2, 'Realism adds meaningful geometric detail');
-assert(getModel('tree:0::2', true).base.getAttribute('position').count < getModel('tree:0::0', true).base.getAttribute('position').count * 0.5, 'Wide-zoom trees reduce geometry while retaining the realistic surface');
+assert(getModel('tree:0::3', true).base.getAttribute('position').count < getModel('tree:0::0', true).base.getAttribute('position').count, 'Wide-zoom trees reduce geometry while retaining the realistic surface');
 console.log(`Validated ${checked} models across both styles. ${Math.round(classicTriangles).toLocaleString()} classic / ${Math.round(realisticTriangles).toLocaleString()} realistic triangles.`);

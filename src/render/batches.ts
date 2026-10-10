@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { getModel } from './models';
 import { applyFogToShader, makeRigDepthMaterial, makeRigMaterial } from './rig';
+import { makeFoliageDepthMaterial } from './foliage';
 import type { ScanAtlas } from './realism';
 
 export type MatKind = 'lit' | 'unlit' | 'add' | 'overlay' | 'ghost';
@@ -36,6 +37,7 @@ export class Batches {
   shadows = true;
   fog: FogUniforms | null = null;
   private rigMats = new Map<string, { mat: THREE.Material; depth: THREE.Material }>();
+  private foliageDepth?: THREE.Material;
 
   constructor(scene: THREE.Scene, mats: Record<MatKind, THREE.Material>, fog?: FogUniforms, public realistic = false, private scans?: ScanAtlas, private wind?: { value: number }) {
     this.scene = scene;
@@ -64,6 +66,7 @@ export class Batches {
       model.base.setAttribute('aAnimB', animB);
       if (model.team) { model.team.setAttribute('aAnim', anim); model.team.setAttribute('aShow', show); model.team.setAttribute('aAnimB', animB); }
     }
+    if (!depth && this.realistic && mat === 'lit' && key.startsWith('tree:')) depth = this.foliageDepth ??= makeFoliageDepthMaterial();
     const mk = (geo: THREE.BufferGeometry) => {
       const m = new THREE.InstancedMesh(geo, material, cap);
       if (depth) m.customDepthMaterial = depth;

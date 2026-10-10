@@ -1,6 +1,7 @@
 /** Detailed, deterministic geometry for the realism renderer. All pieces stay instanced. */
 import * as THREE from 'three';
 import type { MB, Col, PieceOpts } from './mb';
+import { leafClump, spray, spire } from './foliage';
 
 const LEAF = (() => {
   const geometry = new THREE.BufferGeometry();
@@ -45,63 +46,128 @@ function foliage(mb: MB, x: number, y: number, z: number, radius: number, count:
   }
 }
 
-export function realisticTree(mb: MB, variant: number, biome: string, lod = 0) {
-  const density = lod === 2 ? 0.22 : lod === 1 ? 0.5 : 1;
+// ---------------------------------------------------------------- shared tree shapes
+// Lumpy blob (inner shadow mass of broadleaf crowns) and ragged cone (dense core of conifers).
+
+const BLOBS = [0, 1, 2, 3].map((k) => {
+  const g = new THREE.SphereGeometry(1, 9, 6);
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = 1 + Math.sin(x * 3.1 + k * 1.7) * 0.11 + Math.sin(y * 4.3 + z * 2.9 + k) * 0.09 + Math.sin(z * 5.7 - x * 2.3 + k * 2.3) * 0.06;
+    p.setXYZ(i, x * n, y * n * (y < 0 ? 0.72 : 1), z * n);
+  }
+  g.computeVertexNormals();
+  return g;
+});
+const TIER = (() => {
+  const g = new THREE.CylinderGeometry(0, 1, 1, 10, 2, false);
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const a = Math.atan2(z, x);
+    // ragged, drooping branch tips along the bottom edge
+    const r = Math.hypot(x, z);
+    const jag = y < -0.4 ? 1 + Math.sin(a * 5) * 0.12 + Math.sin(a * 11) * 0.06 : 1;
+    p.setXYZ(i, x * jag, y - (r > 0.6 ? Math.max(0, Math.sin(a * 5)) * 0.08 : 0), z * jag);
+  }
+  g.computeVertexNormals();
+  return g;
+})();
+
+// ---------------------------------------------------------------- card trees (all distances)
+// Trunk and limbs are geometry; the foliage is alpha-cut texture cards whose normals are bent outwards
+// from the crown, so it shades like a soft volume with a broken, leafy silhouette.
+
+function cardTree(mb: MB, variant: number, kind: number, lod: number) {
   const rnd = random(571 + variant * 99);
-  const kind = biome === 'palm' ? (variant % 3 === 0 ? 1 : 3) : variant % 3;
-  const scale = 0.91 + rnd() * 0.22;
+  const scale = 0.9 + rnd() * 0.25;
   mb.push(0, 0, 0, 0, variant * 1.7, 0, scale);
-  const height = kind === 1 ? 1.95 : kind === 3 ? 2.5 : 2.7;
-  const origin = new THREE.Vector3(0, 0.06, 0);
-  const tip = new THREE.Vector3(0.04, height, -0.03);
-  branch(mb, origin, tip, kind === 1 ? 0.105 : 0.072);
-  // Buttress roots visibly anchor the trunk to its ground.
-  for (let i = 0; i < 5; i++) {
-    const a = i * 1.256 + variant;
-    branch(mb, new THREE.Vector3(0, 0.19, 0), new THREE.Vector3(Math.cos(a) * 0.28, 0.01, Math.sin(a) * 0.28), 0.035);
-  }
+  const tmp = new THREE.Vector3();
   if (kind === 3) {
-    for (let frond = 0; frond < 10; frond++) {
-      const angle = frond * Math.PI * 2 / 10;
-      let previous = tip.clone();
-      for (let section = 1; section <= 6; section++) {
-        const f = section / 6;
-        const p = new THREE.Vector3(Math.cos(angle) * f * 0.85, height + Math.sin(f * Math.PI) * 0.24 - f * 0.25, Math.sin(angle) * f * 0.85);
-        branch(mb, previous, p, 0.008);
-        for (const side of [-1, 1]) leaf(mb, p.x + Math.cos(angle + side * 1.2) * 0.09, p.y, p.z + Math.sin(angle + side * 1.2) * 0.09, 0.23 * (1.1 - f * 0.5), '#526738', 0.1, -angle + side * 0.65, -0.25);
-        previous = p;
-      }
+    // palm: leaning, segmented trunk and arching fronds (two cards each: rising, then drooping)
+    let prev = new THREE.Vector3(0, 0.02, 0);
+    for (let i = 1; i <= 6; i++) {
+      const p = new THREE.Vector3(Math.sin(i * 0.28) * 0.16, i * 0.42, 0.02 * i);
+      branch(mb, prev, p, 0.075 - i * 0.006);
+      prev = p;
     }
-    mb.ball(0.065, '#73513a', 0.05, height - 0.12, 0.06, { surface: 'bark' });
+    mb.normalFn = (p, n) => {
+      tmp.set(p.x - prev.x * scale, 0.5 * scale, p.z - prev.z * scale).normalize();
+      n.multiplyScalar(0.3).add(tmp).normalize();
+    };
+    const cols = ['#7d9650', '#86a058', '#73904a'];
+    for (let f = 0; f < 9; f++) {
+      const a = f * (Math.PI * 2 / 9) + rnd() * 0.3, l1 = 0.45 + rnd() * 0.1, rise = -0.35 - rnd() * 0.2;
+      spray(mb, prev.x, prev.y, prev.z, a, l1, rise, cols[f % 3]);
+      const ex = prev.x + Math.cos(a) * l1 * Math.cos(rise), ey = prev.y - Math.sin(rise) * l1, ez = prev.z + Math.sin(a) * l1 * Math.cos(rise);
+      spray(mb, ex, ey, ez, a, 0.55 + rnd() * 0.15, 0.55 + rnd() * 0.25, cols[(f + 1) % 3]);
+    }
+    mb.ball(0.07, '#73513a', prev.x + 0.05, prev.y - 0.1, prev.z + 0.05, { surface: 'bark' });
   } else if (kind === 1) {
-    for (let i = 0; i < 12; i++) {
-      const angle = i * 2.399;
-      const start = new THREE.Vector3(0, 0.75 + rnd() * 0.45, 0);
-      const radius = 0.3 + rnd() * 0.33;
-      const end = new THREE.Vector3(Math.cos(angle) * radius, 1.45 + rnd() * 0.65, Math.sin(angle) * radius);
-      branch(mb, start, end, 0.03);
-      for (let j = 0; j < 2; j++) {
-        const twig = end.clone().add(new THREE.Vector3((rnd() - 0.5) * 0.35, rnd() * 0.2, (rnd() - 0.5) * 0.35));
-        branch(mb, end, twig, 0.009);
-      }
-      foliage(mb, end.x, end.y, end.z, 0.32 + rnd() * 0.15, 54, 99 + i * 17 + variant * 19, false, density);
+    // broadleaf: buttressed trunk, a few limbs, clumps clustered around a lobed crown
+    const crownY = 1.62 + rnd() * 0.15, rx = 0.8 + rnd() * 0.12, ry = 0.66 + rnd() * 0.08;
+    branch(mb, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.03, 1.25, -0.02), 0.11);
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.1 + rnd();
+      branch(mb, new THREE.Vector3(0, 0.12, 0), new THREE.Vector3(Math.cos(a) * 0.22, 0.0, Math.sin(a) * 0.22), 0.03);
     }
-    foliage(mb, 0, 2.03, 0, 0.43, 85, variant + 928, false, density);
+    const limbs: THREE.Vector3[] = [];
+    for (let i = 0; i < 4; i++) {
+      const a = i * 1.57 + rnd() * 0.6;
+      const end = new THREE.Vector3(Math.cos(a) * rx * 0.6, crownY - 0.05 + rnd() * 0.25, Math.sin(a) * rx * 0.6);
+      branch(mb, new THREE.Vector3(0.02, 0.95 + i * 0.1, 0), end, 0.035);
+      limbs.push(end);
+    }
+    mb.normalFn = (p, n) => {
+      tmp.set(p.x, (p.y - crownY * scale) * 1.15 + 0.12 * scale, p.z).normalize();
+      n.multiplyScalar(0.25).add(tmp).normalize();
+    };
+    // dark inner mass keeps the crown from looking see-through at a distance
+    mb.add(BLOBS[variant % 4], '#3a4f26', 0, crownY - 0.05, 0, { surface: 'leaf' }, rx * 0.45, ry * 0.45, rx * 0.45);
+    const cols = ['#6f8c44', '#7a964b', '#66823f', '#83a052'];
+    const n = lod >= 3 ? 16 : 22;
+    for (let i = 0; i < n; i++) {
+      // fibonacci-ish spread over the upper ~3/4 of an ellipsoid, pulled towards the limb ends
+      const t = (i + 0.5) / n, y = 0.95 - t * 1.75;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const a = i * 2.399 + rnd() * 0.5;
+      let x = Math.cos(a) * r * rx * 0.78, z = Math.sin(a) * r * rx * 0.78;
+      const l = limbs[i % limbs.length];
+      x = x * 0.75 + l.x * 0.25; z = z * 0.75 + l.z * 0.25;
+      const size = 0.62 + rnd() * 0.2 - (y < -0.3 ? 0.08 : 0);
+      leafClump(mb, x, crownY + y * ry * 0.85, z, size, cols[(i + variant) % cols.length], rnd);
+    }
   } else {
-    // Layered lateral branches, broken silhouette and individual needles/leaves.
-    for (let level = 0; level < 7; level++) {
-      const y = 0.55 + level * 0.28;
-      const radius = 0.57 * (1 - level / 8);
-      for (let j = 0; j < 6; j++) {
-        const angle = j * 1.047 + level * 0.73;
-        const end = new THREE.Vector3(Math.cos(angle) * radius, y + 0.04, Math.sin(angle) * radius);
-        branch(mb, new THREE.Vector3(0, y + 0.08, 0), end, 0.012);
-        foliage(mb, end.x * 0.75, y + 0.1, end.z * 0.75, radius * 0.38 + 0.12, 20, level * 103 + j * 17 + variant, true, density);
+    // conifer: straight trunk with whorls of drooping needle sprays, narrowing to a spire
+    const top = 2.7 + rnd() * 0.3;
+    branch(mb, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.02, top - 0.2, -0.01), 0.07);
+    mb.normalFn = (p, n) => {
+      const h = Math.hypot(p.x, p.z);
+      tmp.set(p.x, h * 0.55 + 0.22 * scale, p.z).normalize();
+      n.multiplyScalar(0.2).add(tmp).normalize();
+    };
+    mb.add(TIER, '#22331d', 0, (top * 0.55) / 2 + 0.5, 0, { surface: 'leaf', ry: variant }, 0.3, top * 0.55, 0.3);
+    const cols = kind === 0 ? ['#5c7843', '#647f49', '#53703d'] : ['#506e47', '#58764e', '#496641'];
+    const tiers = lod >= 3 ? 6 : 8;
+    for (let t = 0; t < tiers; t++) {
+      const f = t / tiers, y = 0.45 + f * (top - 0.75);
+      const len = 0.78 * (1 - f * 0.82) + 0.12;
+      const per = Math.max(4, Math.round(7 - f * 3));
+      for (let j = 0; j < per; j++) {
+        const a = j * (Math.PI * 2 / per) + t * 0.9 + rnd() * 0.4;
+        spray(mb, Math.cos(a) * 0.03, y + rnd() * 0.06, Math.sin(a) * 0.03, a, len * (0.85 + rnd() * 0.3), 0.32 + f * 0.1 + rnd() * 0.15, cols[(j + t) % 3]);
       }
     }
-    foliage(mb, 0, 2.52, 0, 0.15, 30, variant + 319, true, density);
+    spire(mb, 0, top - 0.45, 0, 0.6, cols[0]);
   }
+  mb.normalFn = null;
   mb.pop();
+}
+
+export function realisticTree(mb: MB, variant: number, biome: string, lod = 0) {
+  const kind = biome === 'palm' ? (variant % 3 === 0 ? 1 : 3) : variant % 3;
+  cardTree(mb, variant, kind, lod);
 }
 
 export function realisticDeco(mb: MB, type: string, variant: number): boolean {

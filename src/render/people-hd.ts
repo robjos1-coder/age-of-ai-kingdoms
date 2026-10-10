@@ -296,6 +296,15 @@ function headHD(mb: MB, s: Spec, skin: Col) {
       bead(mb, 0.022, hair, -0.055, y + 0.012, 0, { surface: 'cloth' });
       mb.add(DOM(), P.linen, -0.006, y + 0.012, 0, { surface: 'cloth', rz: 0.25 }, 0.056, 0.05, 0.054);
       break;
+    case 'kerchief': {
+      // white linen headscarf tied at the back, a little hair at the brow
+      mb.add(DOM(), hair, -0.006, y - 0.004, 0, { surface: 'cloth' }, 0.053, 0.06, 0.05);
+      mb.add(DOM(), P.white, -0.012, y + 0.002, 0, { surface: 'cloth' }, 0.058, 0.066, 0.056);
+      mb.add(ELL(), P.white, -0.032, y - 0.02, 0, { surface: 'cloth' }, 0.034, 0.045, 0.05);
+      mb.add(ELL(), P.white, -0.05, y - 0.058, 0, { surface: 'cloth', rz: 0.3 }, 0.014, 0.034, 0.03);
+      mb.add(ELL(), P.team, -0.004, y + 0.024, 0, { team: true, surface: 'cloth' }, 0.058, 0.008, 0.056);
+      break;
+    }
     case 'cap':
       capHair(0.6);
       mb.add(DOM(), P.team, -0.004, y + 0.012, 0, { team: true, surface: 'cloth' }, 0.057, 0.06, 0.055);
@@ -305,7 +314,7 @@ function headHD(mb: MB, s: Spec, skin: Col) {
     case 'straw':
       capHair(0.6);
       mb.add(DOM(), P.straw, -0.004, y + 0.02, 0, { surface: 'thatch' }, 0.045, 0.045, 0.045);
-      cy(mb, 0.1, 0.1, 0.006, 20, P.straw, -0.004, y + 0.022, 0, { surface: 'thatch' });
+      cy(mb, 0.115, 0.115, 0.007, 20, P.straw, -0.004, y + 0.022, 0, { surface: 'thatch' });
       cy(mb, 0.046, 0.046, 0.01, 16, '#7a4a2a', -0.004, y + 0.027, 0, { surface: 'cloth' });
       break;
     case 'hood': {
@@ -438,6 +447,10 @@ export function humanHD(mb: MB, s: Spec, piv: Float32Array, ox = 0, oy = 0) {
   const shirtCol = s.robe ?? s.shirt;
   const shirtSurf: Surface = s.robe ? 'wool' : 'cloth';
   mb.add(torso, shirtCol, 0, 0, 0, { team: s.shirtTeam && !s.robe, surface: shirtSurf });
+  if (s.vest) {
+    // open jerkin: a leather shell over the back and sides, the linen shirt shows down the front
+    mb.add(drape(0.082, 0.085, 0.13, 3, 0.02, 12, Math.PI * 1.45, Math.PI * 0.27), s.vest, 0, 0.075, 0, { surface: 'leather' });
+  }
   if (s.chain) mb.add(turned([0.076, 0.082, 0.09, 0.096, 0.094, 0.078, 0.046], Y.neck - Y.waist + 0.005, 9, false, true), s.chain, 0, 0.0, 0, { surface: 'metal' });
   if (s.chest && s.chest !== s.chain) {
     const plate = s.chest === P.steel || s.chest === '#b4bcc4' || s.chest === '#cfd4da' || s.chest === '#dce1e6' || s.chest === '#a8b0b8';

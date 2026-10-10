@@ -83,6 +83,7 @@ export function runGallery(which: string) {
       put(`found:${s}`, x, z, 0); x += s + 1.5;
       put(`scaffold:${s}:2`, x, z, 0); x += s + 1.5;
       put(`rubble:${s}`, x, z, 0);
+      if (t === 'house') for (const v of [1, 2]) { x += s + 1.5; for (const age of [2, 3]) { put(`b:house:${age}:${v}`, x, z, 0); x += s + 1.5; } }
       z += s + 1.5;
     }
   }
@@ -100,7 +101,7 @@ export function runGallery(which: string) {
     const mats = { lit, unlit: basic, add: basic, overlay: basic, ghost: basic } as Record<MatKind, THREE.Material>;
     const B = new Batches(scene, mats, undefined, realistic, assets?.model, wind);
     const only = which.split(':').slice(1);
-    const villagerVariant = /^[fm]\d+$/.test(only.at(-1) ?? '') ? only.pop()! : 'm1';
+    const villagerVariant = /^[fm]\d*$/.test(only.at(-1) ?? '') ? only.pop()! : 'm';
     const types = only.length ? only : [...RIGGED];
     const hClips = [CLIP.IDLE, CLIP.WALK, CLIP.READY, CLIP.SWING, CLIP.THRUST, CLIP.BOW, CLIP.AIM, CLIP.THROW, CLIP.CHOP, CLIP.HOE, CLIP.FORAGE, CLIP.HAMMER, CLIP.PRAY, CLIP.CARRY, CLIP.HEAL, CLIP.DEAD];
     const col = new THREE.Color('#2f6fe4');
