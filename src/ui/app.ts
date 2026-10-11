@@ -542,6 +542,19 @@ export class App {
   // ------------------------------------------------------------------ world interaction
 
   /** Primary tap/click on the world. touch=true uses the mobile "smart tap" scheme. */
+  private holdHintShown = false;
+
+  /** Touch long-press on one of your buildings while units are selected: send them to it
+   *  (drop off, garrison, repair or build). Returns false when the press should start a box select. */
+  holdCommand(sx: number, sy: number): boolean {
+    const g = this.game, r = this.renderer;
+    if (!g || !r || this.mode.k !== 'normal' || !this.ownUnits().length) return false;
+    const hit = r.pickEntity(sx, sy);
+    if (!hit || hit.k !== 'b' || hit.o !== g.human) return false;
+    this.command(sx, sy, hit, r.groundAt(sx, sy));
+    return true;
+  }
+
   tapWorld(sx: number, sy: number, opts: { touch: boolean; shift?: boolean; double?: boolean }) {
     const g = this.game!, r = this.renderer!;
     const ground = r.groundAt(sx, sy);
@@ -592,10 +605,15 @@ export class App {
     }
     if (hit && own(hit)) {
       if (opts.double) { this.selectSameType(hit); return; }
-      // villagers tapping their own unfinished / farm / damaged building -> work on it
-      if (vilSel && hit.k === 'b' && !this.view.selection.has(hit.id)) {
-        const needsWork = !hit.done || hit.t === 'farm' || hit.hp < buildingStats(g.players[hit.o], hit.t).hp || (units.some((u) => u.ca > 0) && buildingDef(hit.t).drop);
-        if (needsWork) { this.command(sx, sy, hit, ground, !!opts.shift); return; }
+      // villagers tapping an unfinished foundation or a farm -> work on it; any other own building is
+      // simply selected (press and hold it instead to send the selection there: drop off, garrison, repair)
+      if (vilSel && hit.k === 'b' && !this.view.selection.has(hit.id) && (!hit.done || hit.t === 'farm')) {
+        this.command(sx, sy, hit, ground, !!opts.shift);
+        return;
+      }
+      if (units.length && hit.k === 'b' && !this.holdHintShown) {
+        this.holdHintShown = true;
+        this.hud.toast('Tip: press and hold a building to send your selected units to it', 'gold', 3200);
       }
       // military tapping a transport / garrisonable building: select it instead (use Garrison button)
       if (opts.shift) { this.view.selection.add(hit.id); this.hud.dirty = true; return; }

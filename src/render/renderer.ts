@@ -395,10 +395,15 @@ export class Renderer {
       const [x, y] = this.unitRenderPos(u, alpha);
       if (x < this.bounds.x0 || x > this.bounds.x1 || y < this.bounds.y0 || y > this.bounds.y1) continue;
       const d = unitDef(u.t);
-      const hh = this.unitY(u, x, y) + (d.radius > 0.4 ? 0.4 : 0.3);
-      const p = this.toScreen(x, y, hh);
-      const dist = Math.hypot(p.x - sx, p.y - sy);
-      const r = Math.max(minR, d.radius * ppu * 1.4);
+      // Hit-test the whole body (a screen-space capsule from the feet to the head), so tapping a
+      // unit's head or shoulders selects it instead of falling through to the ground behind it.
+      const base = this.unitY(u, x, y);
+      const tall = (d.radius > 0.4 ? 1.0 : 0.75) * this.unitScale;
+      const p0 = this.toScreen(x, y, base + 0.1), p1 = this.toScreen(x, y, base + tall);
+      const vx = p1.x - p0.x, vy = p1.y - p0.y;
+      const k = Math.max(0, Math.min(1, ((sx - p0.x) * vx + (sy - p0.y) * vy) / Math.max(1, vx * vx + vy * vy)));
+      const dist = Math.hypot(p0.x + vx * k - sx, p0.y + vy * k - sy);
+      const r = Math.max(minR * 0.85, d.radius * ppu * 1.4);
       if (dist < r && dist < bestD) { bestD = dist; best = u; }
     }
     if (best) return best;

@@ -63,6 +63,11 @@ export class Input {
     if (!this.app.boxMode && this.app.mode.k === 'normal') {
       this.longTimer = window.setTimeout(() => {
         if (this.mode === 'pending' && !this.moved) {
+          if (this.app.holdCommand(p.x, p.y)) {
+            this.mode = 'none';
+            if (navigator.vibrate) navigator.vibrate(20);
+            return;
+          }
           this.mode = 'box';
           if (navigator.vibrate) navigator.vibrate(20);
           this.showBox(p.sx, p.sy, p.x, p.y);

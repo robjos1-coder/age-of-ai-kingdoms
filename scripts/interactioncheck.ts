@@ -23,7 +23,7 @@ const scout = [...game.units.values()].find((u) => u.o === game.human && u.t ===
 let target: Entity = sheep;
 // Only browser rendering is stubbed. App selection, smart taps, and game commands are real.
 const app = Object.assign(Object.create(App.prototype) as App, {
-  game, mode: { k: 'normal' }, menuPath: 'root', hud: { dirty: false },
+  game, mode: { k: 'normal' }, menuPath: 'root', hud: { dirty: false, toast: () => {} },
   view: { selection: new Set<number>(), markers: [] },
   renderer: {
     time: 0, groundAt: () => ({ x: target.x, y: target.y }), pickEntity: () => target,
@@ -62,6 +62,18 @@ assert.deepEqual([...app.view.selection], [sheep.id], 'Desktop left click retain
 reset(villager.id); app.command(100, 100);
 assert.equal(villager.task?.k, 'gather', 'Desktop right-click retains shepherding');
 
+// Own completed buildings: a tap selects them; press-and-hold sends the selected villagers there.
+const tc = [...game.buildings.values()].find((b) => b.o === game.human && b.t === 'town_center')!;
+reset(villager.id); villager.ca = 5; villager.ct = 'wood'; target = tc; tap();
+assert.deepEqual([...app.view.selection], [tc.id], 'Tapping your own town centre selects it instead of ordering the villager');
+assert(villager.task?.id !== tc.id && villager.sub !== 1, 'The previously selected villager is not sent to the town centre by a tap');
+reset(villager.id); target = tc;
+assert(app.holdCommand(100, 100), 'Press-and-hold on your own building issues an order');
+assert(villager.task?.k === 'gather' && villager.sub === 1, 'Press-and-hold sends the loaded villager to drop off at the town centre');
+reset(); target = tc;
+assert(!app.holdCommand(100, 100), 'Press-and-hold with nothing selected falls back to box selection');
+villager.ca = 0;
+
 reset(villager.id);
 sheep.o = 0; tap();
 assert.equal(villager.task?.k, 'gather', 'Neutral sheep remain gatherable');
@@ -72,4 +84,4 @@ const initialStock = game.players[game.human].res.food;
 for (let tick = 0; tick < 300; tick++) game.tick();
 assert(sheep.dead !== undefined && sheep.food! < initialFood, 'A claimed sheep is harvested after the tap');
 assert(villager.ca > 0 || game.players[game.human].res.food > initialStock, 'Gathered food reaches the villager or stockpile');
-console.log('Interaction checks passed: claimed and neutral sheep, repeated taps, groups, queues, selection, desktop commands, and food harvesting.');
+console.log('Interaction checks passed: claimed and neutral sheep, repeated taps, groups, queues, selection, desktop commands, and food harvesting, building taps vs press-and-hold.');

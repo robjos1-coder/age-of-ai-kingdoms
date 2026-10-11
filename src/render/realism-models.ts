@@ -190,7 +190,7 @@ export function realisticDeco(mb: MB, type: string, variant: number): boolean {
   if (type === 'grass' || type === 'flower') {
     // painted grass cards (true colour in the texture, gentle per-variant tint)
     const tint = ['#eceedc', '#e2e8cf', '#efe8d2', '#dce3c8'][variant % 4];
-    grassTuft(mb, 0.5 + rnd() * 0.2, 0.3 + rnd() * 0.1, tint, type === 'flower', rnd() * 3, 3 + (variant % 2));
+    grassTuft(mb, 0.34 + rnd() * 0.12, 0.19 + rnd() * 0.07, tint, type === 'flower', rnd() * 3, 3 + (variant % 2));
     return true;
   }
   if (type === 'reed') {

@@ -166,14 +166,14 @@ export class Terrain {
       else if (t === T_SAND) d = r < 0.02 ? 'rock' : desert && r < 0.03 ? 'cactus' : null;
       else if (t === T_DIRT) d = r < 0.04 ? 'rock' : r < 0.07 ? 'grass' : null;
       else if (t === T_SHALLOW) d = r < 0.15 ? 'reed' : null;
-      if (scans && !desert && !d && (t === T_GRASS || t === T_FOREST) && r < 0.43) d = 'grass';
-      if (scans && !desert && (t === T_GRASS || t === T_FOREST) && r < 0.8) {
-        const extra = t === T_FOREST || r < 0.3 ? 2 : 1;
+      if (scans && !desert && !d && (t === T_GRASS || t === T_FOREST) && r < 0.3) d = 'grass';
+      if (scans && !desert && (t === T_GRASS || t === T_FOREST) && (r < 0.22 || (t === T_FOREST && r < 0.5))) {
+        const extra = 1;
         for (let k = 0; k < extra; k++) this.decos.push({ t: rnd() < 0.06 && t === T_GRASS ? 'flower' : 'grass', x: x + rnd(), y: y + rnd(), v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.6 + rnd() * 0.6, hi: true });
       }
       if (!d) continue;
       this.decos.push({ t: d, x: x + 0.2 + rnd() * 0.6, y: y + 0.2 + rnd() * 0.6, v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.8 + rnd() * 0.5 });
-      if (scans && !desert && (t === T_GRASS || t === T_FOREST) && r < 0.65) {
+      if (scans && !desert && (t === T_GRASS || t === T_FOREST) && r < 0.2) {
         this.decos.push({ t: 'grass', x: x + rnd(), y: y + rnd(), v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.65 + rnd() * 0.6 });
       }
     }
