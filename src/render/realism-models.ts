@@ -177,14 +177,28 @@ export function realisticDeco(mb: MB, type: string, variant: number): boolean {
     for (let i = 0; i < 5; i++) branch(mb, new THREE.Vector3(0, 0.02, 0), new THREE.Vector3((rnd() - 0.5) * 0.3, 0.17 + rnd() * 0.16, (rnd() - 0.5) * 0.3), 0.009);
     const tmp = new THREE.Vector3();
     mb.normalFn = (p, n) => { tmp.set(p.x, (p.y - 0.12) * 1.3 + 0.08, p.z).normalize(); n.multiplyScalar(0.25).add(tmp).normalize(); };
-    const cols = ['#6f8c44', '#7a964b', '#66823f'];
-    const n = type === 'berry' ? 6 : 5;
+    const berry = type === 'berry';
+    const cols = berry ? ['#4f6c34', '#58753a', '#47632f'] : ['#6f8c44', '#7a964b', '#66823f'];
+    const n = berry ? 7 : 5;
     for (let i = 0; i < n; i++) {
       const a = i * 2.399 + rnd(), r = i ? 0.13 + rnd() * 0.06 : 0;
       leafClump(mb, Math.cos(a) * r, 0.2 + rnd() * 0.08 + (i ? 0 : 0.06), Math.sin(a) * r, 0.3 + rnd() * 0.08, cols[i % 3], rnd);
     }
     mb.normalFn = null;
-    if (type === 'berry') for (let i = 0; i < 16; i++) mb.ball(0.017, i % 3 ? '#93283c' : '#653052', Math.cos(i * 2.4) * 0.26, 0.18 + rnd() * 0.16, Math.sin(i * 2.4) * 0.26, { surface: 'skin' });
+    if (berry) {
+      // clusters of three glossy berries spread over the outside of the bush
+      for (let i = 0; i < 15; i++) {
+        const a = i * 2.399 + rnd() * 0.4, y = 0.12 + rnd() * 0.3;
+        const r = 0.3 * Math.sqrt(Math.max(0.2, 1 - ((y - 0.24) / 0.3) ** 2)) + 0.03;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r, col = i % 4 === 3 ? '#7a2468' : '#d4243a';
+        for (let k = 0; k < 3; k++) mb.bead(0.03, col, x + Math.cos(k * 2.1) * 0.03, y + (k === 2 ? 0.035 : 0), z + Math.sin(k * 2.1) * 0.03, { surface: 'skin' });
+      }
+      // a few clusters peeking out of the crown so the bush also reads from straight above
+      for (let i = 0; i < 4; i++) {
+        const a = i * 1.57 + 0.4, x = Math.cos(a) * 0.1, z = Math.sin(a) * 0.1;
+        for (let k = 0; k < 3; k++) mb.bead(0.03, i === 3 ? '#7a2468' : '#d4243a', x + Math.cos(k * 2.1) * 0.03, 0.47 + (k === 2 ? 0.03 : 0), z + Math.sin(k * 2.1) * 0.03, { surface: 'skin' });
+      }
+    }
     return true;
   }
   if (type === 'grass' || type === 'flower') {
@@ -224,22 +238,22 @@ export function realisticDeposit(mb: MB, type: 'gold' | 'stone', variant: number
     }
     geo.computeVertexNormals();
     mb.push(Math.cos(angle) * distance, radius * 0.31 - 0.025, Math.sin(angle) * distance, rnd() * 0.18, rnd() * 6.28, rnd() * 0.18, radius);
-    mb.add(geo, type === 'gold' ? ['#ad8d5e', '#9c805c', '#8f7758'][rock % 3] : ['#78808b', '#8d949b', '#69737d'][rock % 3], 0, 0, 0, { surface: 'rock' });
+    mb.add(geo, type === 'gold' ? ['#c29a52', '#b48c4a', '#a88244'][rock % 3] : ['#78808b', '#8d949b', '#69737d'][rock % 3], 0, 0, 0, { surface: 'rock' });
     const veins: number[] = [], quartz: number[] = [];
     for (let i = 0; i < p.count; i += 3) {
       const a = new THREE.Vector3().fromBufferAttribute(p, i);
       const b = new THREE.Vector3().fromBufferAttribute(p, i + 1);
       const c = new THREE.Vector3().fromBufferAttribute(p, i + 2);
       const normal = b.clone().sub(a).cross(c.clone().sub(a)).normalize();
-      if (normal.y < 0.12 || rnd() > (type === 'gold' ? 0.32 : 0.14)) continue;
+      if (normal.y < (type === 'gold' ? -0.2 : 0.12) || rnd() > (type === 'gold' ? 0.62 : 0.14)) continue;
       const start = a.clone().lerp(c, 0.24 + rnd() * 0.18), end = b.clone().lerp(c, 0.25);
-      const goldSeam = type === 'gold' && rnd() > 0.35;
-      const width = goldSeam ? 0.12 + rnd() * 0.16 : 0.04 + rnd() * 0.06;
+      const goldSeam = type === 'gold' && rnd() > 0.15;
+      const width = goldSeam ? 0.22 + rnd() * 0.26 : 0.04 + rnd() * 0.06;
       const points = [start, end, end.clone().lerp(c, width), start.clone().lerp(c, width)];
       const target = goldSeam ? veins : quartz;
       for (const j of [0, 1, 2, 0, 2, 3]) target.push(...points[j].clone().addScaledVector(normal, 0.006).toArray());
     }
-    for (const [positions, color, surface] of [[veins, '#bda576', 'gold'], [quartz, '#b7b6ab', 'rock']] as const) {
+    for (const [positions, color, surface] of [[veins, '#f0c040', 'gold'], [quartz, '#b7b6ab', 'rock']] as const) {
       if (!positions.length) continue;
       const seams = new THREE.BufferGeometry();
       seams.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -249,6 +263,16 @@ export function realisticDeposit(mb: MB, type: 'gold' | 'stone', variant: number
     }
     mb.pop();
     geo.dispose();
+  }
+  if (type === 'gold') {
+    // loose nuggets glinting on top of and around the outcrop
+    const nug = new THREE.IcosahedronGeometry(1, 0);
+    for (let i = 0; i < 14; i++) {
+      const a = rnd() * Math.PI * 2, d = i < 5 ? rnd() * 0.18 : 0.3 + rnd() * 0.18;
+      const r = 0.035 + rnd() * 0.035;
+      const y = i < 5 ? 0.16 + rnd() * 0.06 : r * 0.5;
+      mb.add(nug, ['#ffe066', '#ffd040', '#fff09a'][i % 3], Math.cos(a) * d, y, Math.sin(a) * d, { surface: 'gold', rx: rnd() * 3, ry: rnd() * 3 }, r, r * 0.8, r);
+    }
   }
 }
 
