@@ -263,6 +263,7 @@ export class Menus {
       <h2>Settings</h2>
       <div class="grid2">
         <label class="f">Graphics quality<select id="o-q"><option value="low">Low (fast, no shadows)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+        <label class="f"><span><input type="checkbox" id="o-fullres"> Full screen resolution</span><small class="sub">High quality only. Renders every screen pixel (sharpest, but slower on phones).</small></label>
         <label class="f"><span><input type="checkbox" id="o-realism"> Realistic graphics</span><small class="sub">Detailed models, photographic textures, natural lighting and reflective water.</small></label>
         <label class="f"><span><input type="checkbox" id="o-fps"> Show FPS</span><small class="sub">Frame rate, frame time, draw calls and triangles on screen. Tap the counter to hide it.</small></label>
         <label class="f"><span><input type="checkbox" id="o-persp"> Perspective camera</span><small class="sub">AoE4-style camera with depth. Turn off for a classic flat isometric view.</small></label>
@@ -283,6 +284,7 @@ export class Menus {
     q<HTMLInputElement>('#o-haze').checked = pr.haze;
     q<HTMLInputElement>('#o-persp').checked = pr.perspective;
     q<HTMLInputElement>('#o-fps').checked = pr.showFps;
+    q<HTMLInputElement>('#o-fullres').checked = pr.fullRes;
     q<HTMLSelectElement>('#o-speed').value = String(pr.speed);
     q<HTMLInputElement>('#o-sfx').value = String(pr.sfx);
     q<HTMLInputElement>('#o-music').value = String(pr.music);
@@ -297,6 +299,7 @@ export class Menus {
       pr.haze = q<HTMLInputElement>('#o-haze').checked;
       pr.perspective = q<HTMLInputElement>('#o-persp').checked;
       pr.showFps = q<HTMLInputElement>('#o-fps').checked;
+      pr.fullRes = q<HTMLInputElement>('#o-fullres').checked;
       if (!pr.showFps) this.app.hud.hidePerf();
       pr.speed = +q<HTMLSelectElement>('#o-speed').value;
       pr.sfx = +q<HTMLInputElement>('#o-sfx').value;
@@ -312,6 +315,7 @@ export class Menus {
       this.app.renderer?.setRealism(pr.realism);
       this.app.renderer?.setHaze(pr.haze);
       this.app.renderer?.setPerspective(pr.perspective);
+      this.app.renderer?.setFullRes(pr.fullRes);
       this.app.savePrefs();
       this.app.hud.reset();
     };

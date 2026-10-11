@@ -1,7 +1,7 @@
 /** Detailed, deterministic geometry for the realism renderer. All pieces stay instanced. */
 import * as THREE from 'three';
 import type { MB, Col, PieceOpts } from './mb';
-import { leafClump, spray, spire } from './foliage';
+import { grassTuft, leafClump, spray, spire } from './foliage';
 
 const LEAF = (() => {
   const geometry = new THREE.BufferGeometry();
@@ -173,24 +173,32 @@ export function realisticTree(mb: MB, variant: number, biome: string, lod = 0) {
 export function realisticDeco(mb: MB, type: string, variant: number): boolean {
   const rnd = random(88 + variant * 67);
   if (type === 'bush' || type === 'berry') {
+    // low shrub of leaf-cluster cards around a few stems
     for (let i = 0; i < 5; i++) branch(mb, new THREE.Vector3(0, 0.02, 0), new THREE.Vector3((rnd() - 0.5) * 0.3, 0.17 + rnd() * 0.16, (rnd() - 0.5) * 0.3), 0.009);
-    foliage(mb, 0, 0.23, 0, type === 'berry' ? 0.33 : 0.24, type === 'berry' ? 90 : 55, variant + 319);
+    const tmp = new THREE.Vector3();
+    mb.normalFn = (p, n) => { tmp.set(p.x, (p.y - 0.12) * 1.3 + 0.08, p.z).normalize(); n.multiplyScalar(0.25).add(tmp).normalize(); };
+    const cols = ['#6f8c44', '#7a964b', '#66823f'];
+    const n = type === 'berry' ? 6 : 5;
+    for (let i = 0; i < n; i++) {
+      const a = i * 2.399 + rnd(), r = i ? 0.13 + rnd() * 0.06 : 0;
+      leafClump(mb, Math.cos(a) * r, 0.2 + rnd() * 0.08 + (i ? 0 : 0.06), Math.sin(a) * r, 0.3 + rnd() * 0.08, cols[i % 3], rnd);
+    }
+    mb.normalFn = null;
     if (type === 'berry') for (let i = 0; i < 16; i++) mb.ball(0.017, i % 3 ? '#93283c' : '#653052', Math.cos(i * 2.4) * 0.26, 0.18 + rnd() * 0.16, Math.sin(i * 2.4) * 0.26, { surface: 'skin' });
     return true;
   }
-  if (type === 'grass' || type === 'reed' || type === 'flower') {
-    const reed = type === 'reed';
-    const count = reed ? 12 : 18;
-    for (let i = 0; i < count; i++) {
-      const x = (rnd() - 0.5) * 0.28, z = (rnd() - 0.5) * 0.28;
-      const h = reed ? 0.24 + rnd() * 0.35 : 0.09 + rnd() * 0.14;
-      leaf(mb, x, h / 2, z, h, ['#5f7536', '#6b7f3d', '#55692f', '#76884a'][i % 4], Math.PI / 2 + rnd() * 0.3, rnd() * 6.28, (rnd() - 0.5) * 0.3);
-      if (reed && i % 3 === 0) mb.cyl(0.01, 0.01, 0.07, 6, '#5c472b', x, h, z, { surface: 'thatch' });
-    }
-    if (type === 'flower') for (let i = 0; i < 3; i++) {
-      const x = (rnd() - 0.5) * 0.2, z = (rnd() - 0.5) * 0.2;
-      mb.cyl(0.003, 0.003, 0.19, 6, '#5c733b', x, 0.095, z, { surface: 'leaf' });
-      for (let p = 0; p < 5; p++) mb.ball(0.012, ['#ded5a1', '#a35d73', '#e7e2d9', '#91709f'][variant % 4], x + Math.cos(p * 1.26) * 0.018, 0.19, z + Math.sin(p * 1.26) * 0.018, { surface: 'skin' }, 0.3);
+  if (type === 'grass' || type === 'flower') {
+    // painted grass cards (true colour in the texture, gentle per-variant tint)
+    const tint = ['#eceedc', '#e2e8cf', '#efe8d2', '#dce3c8'][variant % 4];
+    grassTuft(mb, 0.5 + rnd() * 0.2, 0.3 + rnd() * 0.1, tint, type === 'flower', rnd() * 3, 3 + (variant % 2));
+    return true;
+  }
+  if (type === 'reed') {
+    grassTuft(mb, 0.36, 0.5 + rnd() * 0.15, '#c9c49c', false, rnd() * 3);
+    for (let i = 0; i < 4; i++) {
+      const x = (rnd() - 0.5) * 0.2, z = (rnd() - 0.5) * 0.2, h = 0.45 + rnd() * 0.2;
+      mb.cyl(0.004, 0.004, h, 6, '#6b6a3a', x, h / 2, z, { surface: 'leaf' });
+      mb.cyl(0.014, 0.014, 0.08, 6, '#5c472b', x, h + 0.03, z, { surface: 'thatch' });
     }
     return true;
   }

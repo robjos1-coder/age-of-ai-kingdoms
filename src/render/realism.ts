@@ -124,8 +124,10 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
       vec4 scanAlbedo = scanSample(scanColor, vScanUv, floor(vSurface + 0.5), vec2(4.0));
       vec3 scanProperties = scanSample(scanArm, vScanUv, floor(vSurface + 0.5), vec2(4.0)).rgb;
       vec4 foliageTexel = texture2D(foliageMap, vScanUv);
+      vec2 foliageTexels = vScanUv * 1024.0;
+      float foliageLod = log2(max(1.0, max(length(dFdx(foliageTexels)), length(dFdy(foliageTexels)))));
       if (foliageCard) {
-        if (foliageTexel.a < 0.45) discard;
+        if (foliageTexel.a < mix(0.45, 0.16, clamp(foliageLod / 4.0, 0.0, 1.0))) discard;
         scanAlbedo = vec4(foliageTexel.rgb * 1.12, 1.0);
         scanProperties = vec3(1.0, 1.05, 0.0);
       }
@@ -159,6 +161,9 @@ export function makeRealismMaterial(atlas: ScanAtlas, fog: FogUniforms | null, w
   return material;
 }
 
+/** 1 on high quality: blend a rotated, larger-scale second sample into the ground to hide texture tiling. */
+export const groundDetail = { value: 1 };
+
 export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: FogUniforms, size: number, lush = false) {
   const material = new THREE.MeshStandardMaterial({ map: atlas.color, normalMap: atlas.normal, roughness: 1, normalScale: new THREE.Vector2(0.85, 0.85) });
   material.onBeforeCompile = (shader) => {
@@ -166,6 +171,7 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
     shader.uniforms.biomeMap = { value: mask };
     shader.uniforms.worldSize = { value: size };
     shader.uniforms.lushGround = { value: lush ? 1 : 0 };
+    shader.uniforms.groundDetail = groundDetail;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvGroundPos = position;');
@@ -175,13 +181,23 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
         uniform sampler2D biomeMap;
         uniform float worldSize;
         uniform float lushGround;
+        uniform float groundDetail;
         ${ATLAS_GLSL}
+        const mat2 GROT = mat2(0.8, -0.6, 0.6, 0.8);
+        // One layer, optionally mixed with a rotated 0.37× copy in soft patches: breaks the visible repeat.
+        vec3 groundLayer(sampler2D tex, vec2 uv, float slot, vec2 grid, vec2 du, vec2 dv) {
+          vec3 a = scanSampleGrad(tex, uv, slot, grid, du, dv).rgb;
+          if (groundDetail < 0.5) return a;
+          vec3 b = scanSampleGrad(tex, GROT * uv * 0.37 + 0.31, slot, grid, GROT * du * 0.37, GROT * dv * 0.37).rgb;
+          float n = 0.5 + 0.5 * sin(uv.x * 0.83 + sin(uv.y * 0.61) * 2.1) * sin(uv.y * 0.77 + sin(uv.x * 0.53) * 1.7);
+          return mix(a, b, smoothstep(0.35, 0.75, n) * 0.65);
+        }
         vec3 groundScan(sampler2D tex, vec2 uv, vec4 weights, float snow, float rock) {
           // Derivatives must be evaluated before divergent surface branches.
           vec2 du = dFdx(uv), dv = dFdy(uv), grid = vec2(4.0, 2.0);
           vec3 c = vec3(0.0);
-          if (weights.r > 0.001) c += scanSampleGrad(tex, uv, lushGround > 0.5 ? 6.0 : 0.0, grid, du, dv).rgb * weights.r;
-          if (weights.g > 0.001) c += scanSampleGrad(tex, uv, 1.0, grid, du, dv).rgb * weights.g;
+          if (weights.r > 0.001) c += groundLayer(tex, uv, lushGround > 0.5 ? 6.0 : 0.0, grid, du, dv) * weights.r;
+          if (weights.g > 0.001) c += groundLayer(tex, uv, 1.0, grid, du, dv) * weights.g;
           if (weights.b > 0.001) c += scanSampleGrad(tex, uv, 2.0, grid, du, dv).rgb * weights.b;
           if (weights.a > 0.001) c += scanSampleGrad(tex, uv, 3.0, grid, du, dv).rgb * weights.a;
           if (snow > 0.001) c = mix(c, scanSampleGrad(tex, uv, 4.0, grid, du, dv).rgb, snow);
@@ -222,6 +238,6 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
       `);
     applyFogToShader(shader, fog);
   };
-  material.customProgramCacheKey = () => 'realism-ground-v1';
+  material.customProgramCacheKey = () => 'realism-ground-v2';
   return material;
 }

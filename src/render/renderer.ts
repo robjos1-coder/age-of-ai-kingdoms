@@ -9,7 +9,7 @@ import { MOUNTED, QUADS, RIGGED, TAG } from './people';
 import { CLIP, QCLIP, makeRigMaterial } from './rig';
 import { Terrain, WATER_Y } from './terrain';
 import './grading';
-import { RealismAssets, makeRealismMaterial } from './realism';
+import { RealismAssets, groundDetail, makeRealismMaterial } from './realism';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -70,6 +70,8 @@ export class Renderer {
   };
   game: Game;
   quality: Quality = 'high';
+  /** High quality: allow up to 3× pixel density (native on most phones). */
+  fullRes = false;
   realism = true;
   haze = true;
   private realismAssets: RealismAssets | null = null;
@@ -105,6 +107,7 @@ export class Renderer {
     this.game = game;
     this.view = view;
     this.quality = quality;
+    groundDetail.value = quality === 'high' ? 1 : 0;
     this.realism = realism;
     this.haze = haze;
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: quality !== 'low', powerPreference: 'high-performance' });
@@ -154,9 +157,15 @@ export class Renderer {
     this.updateCamera();
   }
 
+  setFullRes(on: boolean) {
+    this.fullRes = on;
+    this.resize();
+  }
+
   setQuality(q: Quality) {
     if (q === this.quality) return;
     this.quality = q;
+    groundDetail.value = q === 'high' ? 1 : 0;
     this.gl.shadowMap.enabled = q !== 'low';
     this.sun.castShadow = q !== 'low';
     this.batches.setShadows(q !== 'low');
@@ -243,7 +252,7 @@ export class Renderer {
     // Rotation/background transitions can briefly have no usable layout.
     if (w <= 0 || h <= 0) return;
     const dpr = window.devicePixelRatio || 1;
-    const pixelRatio = this.quality === 'high' ? Math.min(dpr, 2) : this.quality === 'medium' ? Math.min(dpr, 1.5) : 1;
+    const pixelRatio = this.quality === 'high' ? Math.min(dpr, this.fullRes ? 3 : 2) : this.quality === 'medium' ? Math.min(dpr, 1.5) : 1;
     if (w === this.width && h === this.height && pixelRatio === this.gl.getPixelRatio()
       && this.canvas.width === Math.floor(w * pixelRatio) && this.canvas.height === Math.floor(h * pixelRatio)) return;
     this.width = w; this.height = h;
@@ -499,7 +508,7 @@ export class Renderer {
   /** Rigged model key for a unit (villagers come in several looks). */
   rigKey(u: Unit) {
     // realistic characters swap to a lighter model beyond close-up zoom (or always on low quality)
-    const lod = this.realism && (this.zoom > 9.5 || this.quality === 'low') ? '@1' : '';
+    const lod = this.realism && (this.zoom > (this.quality === 'high' ? 13 : 9.5) || this.quality === 'low') ? '@1' : '';
     if (u.t === 'villager') return `r:villager:${u.fem ? 'f' : 'm'}${lod}`;
     return `r:${u.t}:${lod}`;
   }
@@ -690,6 +699,7 @@ export class Renderer {
       if (!inView(d.x, d.y)) continue;
       const i = Math.floor(d.y) * S + Math.floor(d.x);
       if (g.grid.occ[i] || !g.explored[i]) continue;
+      if (d.hi && (!this.realism || this.quality !== 'high')) continue;
       if (this.realism && this.quality === 'low' && i % 3 !== 0) continue;
       if (this.realism && this.quality !== 'high' && this.zoom > 14 && d.t === 'grass' && i % 2) continue;
       B.add(`d:${d.t}:${d.v}`, d.x, g.grid.h(d.x, d.y), d.y, d.rot, d.s, d.s, d.s, null, null, 'lit', false);
@@ -703,8 +713,8 @@ export class Renderer {
       if (n.t === 'tree') {
         if (n.amt < n.max) B.add(`n:stump:${n.v % 6}`, x, h, y, n.v);
         else {
-          // leafy trees only for high-quality close-ups; otherwise sculpted canopy trees (about 1/6 the triangles)
-          const lod = this.realism ? (this.quality === 'high' && this.zoom < 8 ? 0 : this.quality === 'high' && this.zoom < 11 ? 1 : 3) : 0;
+          // fuller crowns (more foliage cards) on high quality unless zoomed far out
+          const lod = this.realism ? (this.quality === 'high' && this.zoom < 16 ? 0 : 3) : 0;
           B.add(`tree:${n.v % 4}:${this.biome}:${lod}`, x, h, y, 0, 1, 1, 1, null, null, 'lit', true);
         }
       } else if (n.t === 'fish') {

@@ -42,6 +42,8 @@ export interface Prefs {
   perspective: boolean;
   /** On-screen FPS / performance overlay. */
   showFps: boolean;
+  /** High quality only: render at the screen's full pixel density (up to 3×) instead of 2×. */
+  fullRes: boolean;
   sfx: number;
   music: number;
   muted: boolean;
@@ -88,7 +90,7 @@ export class App {
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
-    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, showFps: false, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
+    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, showFps: false, fullRes: false, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
     try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
     this.hud = new Hud(this);
     this.input = new Input(this);
@@ -120,6 +122,7 @@ export class App {
         this.game = new Game(settings, save);
         this.view = { selection: new Set(), hover: 0, ghost: null, markers: [], flashIds: new Map() };
         this.renderer = new Renderer(this.canvas, this.game, this.view, this.prefs.quality, this.prefs.realism, this.prefs.haze, this.prefs.perspective);
+        this.renderer.setFullRes(this.prefs.fullRes);
         await this.renderer.ready;
         if (token !== this.startToken) return;
         this.mode = { k: 'normal' };

@@ -100,7 +100,10 @@ export class MB {
           this.normalFn(tmpP, tmpN);
           tgt.nor.push(tmpN.x, tmpN.y, tmpN.z);
         } else tgt.nor.push(nor.getX(i + k), nor.getY(i + k), nor.getZ(i + k));
-        tgt.col.push(tmpC.r * j, tmpC.g * j, tmpC.b * j);
+        // buildings: baked contact shading darkens the foot of every wall
+        const ao = this.context === 'building' && this.realistic && Math.abs(nor.getY(i + k)) < 0.6
+          ? 0.62 + 0.38 * Math.min(1, Math.max(0, (pos.getY(i + k) - 0.08) / 0.45)) : 1;
+        tgt.col.push(tmpC.r * j * ao, tmpC.g * j * ao, tmpC.b * j * ao);
         tgt.bone.push(this.bone);
         tgt.tag.push(this.tag);
         tgt.surface.push(slot);
