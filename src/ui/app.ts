@@ -736,7 +736,8 @@ export class App {
     const out: Cmd[] = [];
     const col = p.color;
     const uIcon = (t: UnitKey) => `<img src="${r.unitIcon(t, col)}">`;
-    const bIcon = (t: BuildingKey) => `<img src="${r.icon(`b:${t}:${Math.max(2, p.age)}`, col)}">`;
+    // buildings are shown in the style they will have when built (locked ones at their unlock age)
+    const bIcon = (t: BuildingKey) => t === 'farm' ? ICON.farm : `<img src="${r.icon(`b:${t}:${Math.min(4, Math.max(p.age, buildingDef(t).age))}`, col)}">`;
 
     if (units.length) {
       const vils = units.filter((u) => u.t === 'villager');
@@ -818,7 +819,10 @@ export class App {
           act: () => {
             if (block) { this.hud.toast(block, 'bad', 2000); play('error'); return; }
             if (!canAfford(p, cost)) { this.notEnough(cost); return; }
-            if (g.cmdResearch(me, b.id, id)) play('click');
+            if (g.cmdResearch(me, b.id, id)) {
+              play('click');
+              if (t.isAge) this.hud.toast(`Advancing to the ${AGE_NAMES[p.age + 1]}: your Town Center is being rebuilt`, 'gold', 3000);
+            }
           },
         });
       }

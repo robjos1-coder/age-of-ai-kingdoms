@@ -7,7 +7,7 @@ import { buildRigged } from './people';
 import { setHDLod } from './people-hd';
 import type { Rig } from './rig';
 import { realisticTree, realisticDeco, realisticDeposit, detailBuilding, detailShip, detailSiege } from './realism-models';
-import { hdBuilding } from './buildings-hd';
+import { hdBuilding, renovation } from './buildings-hd';
 
 export interface ModelGeo {
   base: THREE.BufferGeometry;
@@ -22,7 +22,7 @@ export function getModel(key: string, realistic = false): ModelGeo {
   const cacheKey = `${realistic ? 'real:' : 'classic:'}${key}`;
   let m = cache.get(cacheKey);
   if (m) return m;
-  const context = key.startsWith('b:') ? 'building' : /^(tree:|n:|d:)/.test(key) ? 'natural' : key.startsWith('fx:') ? 'effect' : 'unit';
+  const context = /^(b:|renov:|scaffold:|found:|rubble:)/.test(key) ? 'building' : /^(tree:|n:|d:)/.test(key) ? 'natural' : key.startsWith('fx:') ? 'effect' : 'unit';
   const mb = new MB(realistic, context);
   let rig: Rig | undefined;
   if (key.startsWith('r:')) {
@@ -863,6 +863,7 @@ function buildModel(mb: MB, key: string) {
     case 'b': buildBuilding(mb, parts[1], +(parts[2] ?? 1), +(parts[3] ?? 0)); break;
     case 'found': foundation(mb, +parts[1]); break;
     case 'scaffold': scaffold(mb, +parts[1], +parts[2]); break;
+    case 'renov': renovation(mb, parts[1] ?? 'main'); break;
     case 'rubble': rubbleModel(mb, +parts[1]); break;
     case 'tree': tree(mb, +parts[1], parts[2] ?? '', +(parts[3] ?? 0)); break;
     case 'n': resource(mb, parts[1], +(parts[2] ?? 0)); break;

@@ -10,6 +10,7 @@ let realisticTriangles = 0;
 const keys: string[] = [];
 for (const type of Object.keys(BUILDINGS)) for (const age of [1, 2, 3, 4]) keys.push(`b:${type}:${age}`);
 for (const age of [1, 2, 3, 4]) for (const v of [1, 2]) keys.push(`b:house:${age}:${v}`);
+keys.push('renov:main', 'renov:jib', 'renov:load', 'renov:rope');
 for (const type of Object.keys(UNITS)) {
   if (RIGGED.has(type)) keys.push(`r:${type}:${type === 'villager' ? 'm' : ''}`);
   else for (const pose of ['idle', 'walk1', 'atk1', 'atk2', 'dead']) keys.push(`u:${type}:${pose}:${type === 'trebuchet' ? 'deployed' : ''}`);

@@ -643,3 +643,87 @@ export function hdBuilding(mb: MB, t: string, tier: number, variant: number): bo
   }
   return false;
 }
+
+// ---------------------------------------------------------------- age-up renovation (town centre)
+// Scaffolding, decks, ladders and building materials wrapped around the town centre while it researches
+// the next age. The crane jib and its load are separate keys so the renderer can animate them.
+
+function scaffoldCage(mb: MB, x0: number, z0: number, x1: number, z1: number, y0: number, y1: number, decks: number[]) {
+  const pole = '#8a6a46', plank = '#a8875c';
+  const nx = Math.max(1, Math.round((x1 - x0) / 0.6)), nz = Math.max(1, Math.round((z1 - z0) / 0.6));
+  const posts: [number, number][] = [];
+  for (let i = 0; i <= nx; i++) { posts.push([x0 + ((x1 - x0) * i) / nx, z0]); posts.push([x0 + ((x1 - x0) * i) / nx, z1]); }
+  for (let j = 1; j < nz; j++) { posts.push([x0, z0 + ((z1 - z0) * j) / nz]); posts.push([x1, z0 + ((z1 - z0) * j) / nz]); }
+  for (const [x, z] of posts) cylB(mb, 0.022, 0.026, y1 - y0, 6, pole, x, y0, z, { surface: 'wood' });
+  const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  for (const y of decks) {
+    // ledgers all round and a walkway of planks on the outer face
+    for (const z of [z0, z1]) box(mb, w + 0.06, 0.03, 0.03, pole, cx, y, z, { surface: 'wood' });
+    for (const x of [x0, x1]) box(mb, 0.03, 0.03, d + 0.06, pole, x, y, cz, { surface: 'wood' });
+    for (const z of [z0, z1]) box(mb, w + 0.1, 0.025, 0.22, plank, cx, y + 0.025, z + (z === z0 ? 0.08 : -0.08), { surface: 'wood' });
+    for (const x of [x0, x1]) box(mb, 0.22, 0.025, d + 0.1, plank, x + (x === x0 ? 0.08 : -0.08), y + 0.026, cz, { surface: 'wood' });
+    // guard rail
+    for (const z of [z0, z1]) box(mb, w + 0.06, 0.02, 0.02, pole, cx, y + 0.32, z, { surface: 'wood' });
+    for (const x of [x0, x1]) box(mb, 0.02, 0.02, d + 0.06, pole, x, y + 0.32, cz, { surface: 'wood' });
+  }
+  // diagonal bracing on the long faces
+  for (const z of [z0, z1]) {
+    const len = Math.hypot(w / nx, decks[0] - y0);
+    for (let i = 0; i < nx; i += 2) box(mb, len, 0.02, 0.02, pole, x0 + (w / nx) * (i + 0.5), (y0 + decks[0]) / 2, z, { rz: Math.atan2(decks[0] - y0, w / nx), surface: 'wood' });
+  }
+}
+
+function ladder(mb: MB, x: number, z: number, y0: number, h: number, ry = 0) {
+  mb.push(x, y0, z, 0, ry, 0);
+  for (const s of [-1, 1]) box(mb, 0.02, h, 0.02, '#7a5a3c', 0, h / 2, s * 0.08, { rz: 0.12, surface: 'wood' });
+  for (let y = 0.15; y < h; y += 0.16) box(mb, 0.015, 0.015, 0.17, '#7a5a3c', -0.12 * (y / h) + 0.06, y, 0, { surface: 'wood' });
+  mb.pop();
+}
+
+function stoneBlocks(mb: MB, x: number, z: number, y0: number) {
+  for (let r = 0; r < 2; r++) for (let i = 0; i < 3 - r; i++) for (let j = 0; j < 2; j++)
+    boxB(mb, 0.16, 0.11, 0.12, '#cfc6b2', x + (i - (2 - r) / 2) * 0.17, y0 + r * 0.11, z + (j - 0.5) * 0.13, { surface: 'stone' });
+}
+
+export function renovation(mb: MB, part: string) {
+  const y0 = 0.14;
+  if (part === 'jib') {
+    // rotating jib: arm, counterweight, pulley at the tip (origin = top of the mast)
+    box(mb, 1.5, 0.06, 0.06, '#7a5a3c', 0.45, 0, 0, { surface: 'wood' });
+    box(mb, 0.9, 0.04, 0.04, '#7a5a3c', 0.6, 0.18, 0, { rz: -0.22, surface: 'wood' });
+    boxB(mb, 0.2, 0.16, 0.16, '#8a8278', -0.3, -0.08, 0, { surface: 'stone' });
+    cyl(mb, 0.05, 0.05, 0.05, 10, '#5d6168', 1.15, -0.04, 0, { rx: Math.PI / 2, surface: 'metal' });
+    return;
+  }
+  if (part === 'load') {
+    // hoisted stone block on a rope; rope is 1 unit tall above the block (scaled by the renderer)
+    boxB(mb, 0.2, 0.14, 0.16, '#d4cbb6', 0, 0, 0, { surface: 'stone' });
+    box(mb, 0.012, 0.012, 0.18, '#6b5a3a', 0, 0.15, 0, { surface: 'wood' });
+    return;
+  }
+  if (part === 'rope') {
+    boxB(mb, 0.012, 1, 0.012, '#6b5a3a', 0, 0, 0, { surface: 'wood' });
+    return;
+  }
+  // main scaffolding: round the great hall, a tall cage up the tower, ladders, materials and the crane mast
+  scaffoldCage(mb, -1.72, -1.28, 1.02, 0.48, y0, 1.95, [0.85, 1.55]);
+  scaffoldCage(mb, -0.86, -0.92, 0.16, 0.12, 1.55, 3.25, [2.35, 3.0]);
+  ladder(mb, 1.12, -0.6, y0, 0.78);
+  ladder(mb, -1.82, 0.1, y0 + 0.72, 0.85, Math.PI);
+  stoneBlocks(mb, 1.45, -1.55, y0);
+  woodpileR(mb, -1.6, 1.35, y0);
+  // mortar tub and a cart of stone
+  cylB(mb, 0.12, 0.1, 0.1, 12, '#7a5a3c', 0.6, y0, 1.55, { surface: 'wood' });
+  cylB(mb, 0.1, 0.1, 0.01, 12, '#bdb3a0', 0.6, y0 + 0.09, 1.55, { surface: 'stone' });
+  // crane mast with a ladder and a winch drum
+  for (const [dx, dz] of [[-0.08, -0.08], [0.08, -0.08], [-0.08, 0.08], [0.08, 0.08]]) boxB(mb, 0.035, 2.75, 0.035, '#7a5a3c', 1.55 + dx, y0, -0.95 + dz, { surface: 'wood' });
+  for (let y = 0.4; y < 2.7; y += 0.45) box(mb, 0.2, 0.025, 0.2, '#6a4a30', 1.55, y0 + y, -0.95, { surface: 'wood' });
+  cyl(mb, 0.09, 0.09, 0.3, 12, '#8a6a46', 1.55, y0 + 0.3, -0.62, { rx: Math.PI / 2, surface: 'wood' });
+  // the coming age's banner hung on the scaffold
+  box(mb, 0.012, 0.5, 0.36, K.team, 1.05, y0 + 1.35, -0.35, { team: true, surface: 'cloth' });
+  box(mb, 0.015, 0.03, 0.42, K.gold, 1.06, y0 + 1.6, -0.35, { surface: 'gold' });
+}
+/** Crane mast top in model space (where the jib pivots). */
+export const RENOV_MAST = { x: 1.55, y: 2.89, z: -0.95 };
+
+function woodpileR(mb: MB, x: number, z: number, y0: number) { woodpile(mb, x, z, y0, 0.6, 'x'); }

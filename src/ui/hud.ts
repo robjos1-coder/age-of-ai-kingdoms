@@ -6,7 +6,7 @@ import type { Entity } from '../sim/game';
 import { play } from '../audio/sfx';
 import type { App, Cmd } from './app';
 import { isTouch } from './app';
-import { ICON } from './icons';
+import { ICON, uniqIds } from './icons';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const HOTKEYS = 'QWERTYUIASDFGHJKZXCVBNM';
@@ -66,6 +66,16 @@ export class Hud {
     on('btn-menu', () => this.app.menus.showPause());
     on('btn-pause', () => { this.app.paused = !this.app.paused; this.toast(this.app.paused ? 'Paused' : 'Resumed', undefined, 1000); });
     on('sb-idle', () => this.app.selectIdleVillager());
+    on('age-badge', () => {
+      // jump to the town centre that is advancing the age (or the main one)
+      const g = this.app.game;
+      if (!g) return;
+      const own = [...g.buildings.values()].filter((b) => b.o === g.human && b.t === 'town_center' && b.done);
+      const tc = own.find((b) => b.q[0]?.tech && TECH_BY_ID[b.q[0].tech].isAge) ?? own[0];
+      if (!tc) return;
+      this.app.select([tc.id]);
+      this.app.renderer?.lookAt(...g.epos(tc));
+    });
     on('sb-army', () => this.app.selectArmy());
     on('sb-home', () => this.app.goHome());
     on('sb-alert', () => this.app.jumpToAlert());
@@ -198,13 +208,20 @@ export class Hud {
     popEl.textContent = `${p.pop}/${p.popCap}`;
     popEl.style.color = p.pop >= p.popCap ? 'var(--bad)' : '';
     // age badge
-    let ageProg = -1;
+    let ageProg = -1, ageLeft = 0;
     for (const b of g.buildings.values()) {
       if (b.o !== g.human) continue;
       const q = b.q[0];
-      if (q?.tech && TECH_BY_ID[q.tech].isAge) ageProg = q.t / q.total;
+      if (q?.tech && TECH_BY_ID[q.tech].isAge) { ageProg = q.t / q.total; ageLeft = Math.max(0, q.total - q.t); }
     }
-    $('age-badge').innerHTML = `<span class="full">${AGE_NAMES[p.age]}</span><span class="short" style="display:none">Age ${['', 'I', 'II', 'III', 'IV'][p.age]}</span>${ageProg >= 0 ? `<span class="prog"><i style="width:${ageProg * 100}%"></i></span>` : ''}`;
+    const roman = ['', 'I', 'II', 'III', 'IV'];
+    const ageEl = $('age-badge');
+    ageEl.classList.toggle('busy', ageProg >= 0);
+    ageEl.innerHTML = ageProg >= 0
+      // advancing: show the target age, percentage, a wide bar and the time left; tap jumps to the town centre
+      ? `<span class="up">▲</span><span class="full">${AGE_NAMES[p.age + 1]}</span><span class="short" style="display:none">Age ${roman[p.age + 1]}</span>`
+        + `<span class="prog"><i style="width:${ageProg * 100}%"></i></span><b class="pct">${Math.floor(ageProg * 100)}%</b><span class="eta">${Math.ceil(ageLeft / Math.max(0.1, g.settings.speed ?? 1))}s</span>`
+      : `<span class="full">${AGE_NAMES[p.age]}</span><span class="short" style="display:none">Age ${roman[p.age]}</span>`;
     const tm = Math.floor(g.time);
     $('clock').textContent = `${String(Math.floor(tm / 60)).padStart(2, '0')}:${String(tm % 60).padStart(2, '0')}`;
     const w = g.timeLeftWonder();
@@ -237,23 +254,24 @@ export class Hud {
     const maxColumns = window.matchMedia('(orientation: portrait)').matches ? Math.max(1, Math.min(6, Math.floor((app.canvas.clientWidth - 78) / 48))) : 8;
     const columns = Math.max(1, Math.ceil(cmds.length / Math.max(1, Math.ceil(cmds.length / maxColumns))));
     box.style.setProperty('--cmd-columns', String(columns));
-    const keys = cmds.map((c) => c.key).join(',');
+    const keys = cmds.map((c) => c.key).join(',') + '|' + (app.renderer?.iconsVersion ?? 0);
     if (keys !== this.cmdKeys) {
       this.cmdKeys = keys;
       this.hideTip();
       box.innerHTML = '';
       this.cmdEls = cmds.map((c, i) => {
         const el = document.createElement('button');
-        el.className = 'cmd';
+        el.className = 'cmd' + (c.key.startsWith('t-') ? ' tech' : c.key.startsWith('u-') ? ' unit' : c.key.startsWith('b-') ? ' bld' : '');
         el.setAttribute('aria-label', c.name);
-        el.innerHTML = c.icon + (app.prefs.showHotkeys && i < HOTKEYS.length ? `<span class="hk">${HOTKEYS[i]}</span>` : '') + '<span class="cnt"></span><span class="bar"></span>';
+        el.innerHTML = uniqIds(c.icon) + (app.prefs.showHotkeys && i < HOTKEYS.length ? `<span class="hk">${HOTKEYS[i]}</span>` : '')
+          + '<span class="cnt"></span><span class="lock"></span><span class="price"></span><span class="bar"></span>';
         this.bindCmd(el, i);
         const slot = document.createElement('div');
         slot.className = 'cmd-slot';
         const caption = document.createElement('span');
         caption.className = 'cmd-caption';
         caption.setAttribute('aria-hidden', 'true');
-        caption.textContent = ({ eco: 'Build', mil: 'Military', rally: 'Rally', bell: 'Town bell', clear: 'All clear', ungar: 'Exit', am: 'Attack', ag: 'Bombard', reseed: 'Reseed' } as Record<string, string>)[c.key] ?? c.name.replace(/^Train /, '');
+        caption.textContent = ({ eco: 'Build', mil: 'Military', rally: 'Rally', bell: 'Town bell', clear: 'All clear', ungar: 'Exit', am: 'Attack', ag: 'Bombard', reseed: 'Reseed' } as Record<string, string>)[c.key] ?? shortName(c.name);
         slot.append(el, caption);
         box.appendChild(slot);
         return el;
@@ -267,6 +285,16 @@ export class Hud {
       el.classList.toggle('on', !!c.on);
       el.classList.toggle('age', !!c.age);
       (el.querySelector('.cnt') as HTMLElement).textContent = c.count ? String(c.count) : '';
+      // age-locked: grey art with the required age's numeral; other blocks just grey out
+      const need = /Requires (?:the )?(Feudal|Castle|Imperial)/.exec(c.disabled ?? '')?.[1];
+      const lock = need ? ({ Feudal: 'II', Castle: 'III', Imperial: 'IV' } as Record<string, string>)[need] : '';
+      const lockEl = el.querySelector('.lock') as HTMLElement;
+      if (lockEl.textContent !== lock) lockEl.textContent = lock;
+      el.classList.toggle('locked', !!lock);
+      // price chips on the button itself (red where you are short) so costs read without a tooltip
+      const priceEl = el.querySelector('.price') as HTMLElement;
+      const price = c.cost && !lock ? priceHtml(c.cost, this.app) : '';
+      if (priceEl.dataset.v !== price) { priceEl.dataset.v = price; priceEl.innerHTML = price; }
     });
     if (this.tipFor) {
       const c = cmds.find((x) => x.key === this.tipFor);
@@ -721,6 +749,32 @@ function hexRgb(h: string): [number, number, number] {
     return [r, g, b];
   }
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+const SHORT: Record<string, string> = {
+  'Town Center': 'Town Ctr', 'Watch Tower': 'Tower', 'Guard Tower': 'Tower', 'Siege Workshop': 'Siege', 'Archery Range': 'Archery',
+  'Lumber Camp': 'Lumber', 'Mining Camp': 'Mining', 'Palisade Wall': 'Palisade', 'Palisade Gate': 'P. Gate', 'Stone Wall': 'Wall',
+  'Stone Gate': 'Gate', 'University': 'Univ.', 'Blacksmith': 'Smithy', 'Wheelbarrow': 'Barrow',
+  'Hand Cart': 'Handcart', 'Town Watch': 'Watch', 'Town Patrol': 'Patrol', 'Fishing Ship': 'Fisher', 'Transport Ship': 'Transport',
+  'Battering Ram': 'Ram', 'Scout Cavalry': 'Scout', 'Skirmisher': 'Skirm.', 'Man-at-Arms': 'M-at-Arms', 'Long Swordsman': 'Long Sw.',
+  'Cavalry Archer': 'Cav. Archer',
+};
+/** Button caption: drop verbs and age suffixes, then use a short form for long names. */
+function shortName(name: string) {
+  const n = name.replace(/^(Train|Research|Build|Advance to( the)?) /, '').replace(/ Age$/, '');
+  return SHORT[n] ?? n;
+}
+
+const RES_COL: Record<string, string> = { food: '#e8705a', wood: '#c08a50', gold: '#f2c84a', stone: '#b8b4ac' };
+/** Compact cost chips for a command button: coloured dot + amount, red when unaffordable. */
+function priceHtml(c: Cost, app: App) {
+  const g = app.game;
+  const p = g ? g.players[g.human] : null;
+  return (Object.keys(c) as Res[]).filter((k) => (c[k] ?? 0) > 0).map((k) => {
+    const v = c[k] ?? 0;
+    const short = p && p.res[k] < v;
+    return `<span class="${short ? 'no' : ''}"><i style="background:${RES_COL[k]}"></i>${v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k' : v}</span>`;
+  }).join('');
 }
 
 export function costHtml(c: Cost, app: App) {

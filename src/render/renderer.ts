@@ -1,10 +1,11 @@
 import * as THREE from 'three';
-import { NODE_DEFS, buildingDef, unitDef, type BuildingKey } from '../data/defs';
+import { NODE_DEFS, TECH_BY_ID, buildingDef, unitDef, type BuildingKey } from '../data/defs';
 import type { Entity, Game } from '../sim/game';
 import { unitStats, buildingStats } from '../sim/stats';
 import type { Building, GameEvent, Unit } from '../sim/types';
 import { Batches, applyFog, type FogUniforms, type MatKind } from './batches';
 import { getModel } from './models';
+import { RENOV_MAST } from './buildings-hd';
 import { MOUNTED, QUADS, RIGGED, TAG } from './people';
 import { CLIP, QCLIP, makeRigMaterial } from './rig';
 import { Terrain, WATER_Y } from './terrain';
@@ -48,6 +49,8 @@ const C_HP = new THREE.Color('#3be05a');
 const C_HPLOW = new THREE.Color('#ffb02e');
 const C_HPCRIT = new THREE.Color('#ff3b2e');
 const C_PROG = new THREE.Color('#5ab8ff');
+const C_AGEUP = new THREE.Color('#f0c040');
+const C_DUST = new THREE.Color('#9a8a6c');
 const C_FLASH = new THREE.Color(1.7, 1.5, 1.5);
 const C_GHOST_OK = new THREE.Color('#6dff7a');
 const C_GHOST_BAD = new THREE.Color('#ff5a4a');
@@ -100,6 +103,23 @@ export class Renderer {
   private mats: Record<MatKind, THREE.Material>;
   private iconRT: THREE.WebGLRenderTarget | null = null;
   private iconCache = new Map<string, string>();
+  /** Bumped whenever cached UI icons become stale (realistic textures finished loading, style toggled). */
+  iconsVersion = 0;
+  private assetsReady = false;
+
+  /** Icons switch to the textured realistic models once the scan atlas has loaded. */
+  private trackAssets() {
+    this.assetsReady = false;
+    this.iconCache.clear();
+    this.iconsVersion++;
+    const assets = this.realismAssets;
+    assets?.ready.then(() => {
+      if (assets !== this.realismAssets) return;
+      this.assetsReady = true;
+      this.iconCache.clear();
+      this.iconsVersion++;
+    }).catch(() => {});
+  }
   biome: string;
 
   constructor(canvas: HTMLCanvasElement, game: Game, view: ViewState, quality: Quality, realism = true, haze = true, perspective = true) {
@@ -133,6 +153,7 @@ export class Renderer {
     this.scene.add(this.sun.target);
 
     this.realismAssets = realism ? new RealismAssets(this.gl, this.scene, quality) : null;
+    this.trackAssets();
     const lit = this.realismAssets ? makeRealismMaterial(this.realismAssets.model, this.fog, this.wind) : new THREE.MeshLambertMaterial({ vertexColors: true });
     if (!realism) applyFog(lit, this.fog);
     this.mats = {
@@ -210,6 +231,7 @@ export class Renderer {
     this.realismAssets?.dispose();
     this.scene.environment = null;
     this.realismAssets = this.realism ? new RealismAssets(this.gl, this.scene, this.quality) : null;
+    this.trackAssets();
     const lit = this.realismAssets ? makeRealismMaterial(this.realismAssets.model, this.fog, this.wind) : new THREE.MeshLambertMaterial({ vertexColors: true });
     if (!this.realism) applyFog(lit, this.fog);
     this.mats.lit = lit;
@@ -775,6 +797,8 @@ export class Renderer {
           const rate = (1 - frac) * 10 * s;
           if (Math.random() < rate * dt) this.flame(cx, h + getModel(key, this.realism).height * (0.3 + Math.random() * 0.4), cy, s * 0.5);
         }
+        const ageQ = bl.q[0];
+        if (bl.t === 'town_center' && ageQ?.tech && TECH_BY_ID[ageQ.tech]?.isAge) this.renovate(bl.id, cx, h, cy, ageQ.t / ageQ.total, team, dt);
         if (bl.t === 'blacksmith' && Math.random() < dt * 2) this.particles.push({ key: 'fx:puff', mat: 'lit', x: cx - 0.9, y: h + 2.0, z: cy + 0.35, vx: 0.1, vy: 0.5, vz: 0.05, g: -0.1, life: 2.5, max: 2.5, s0: 0.08, s1: 0.3, c0: new THREE.Color('#8a8a8a'), rot: 0, spin: 0 });
         if (bl.t === 'town_center' && Math.random() < dt * 0.6) this.particles.push({ key: 'fx:puff', mat: 'lit', x: cx - 1.2, y: h + 1.8, z: cy - 1.2, vx: 0.1, vy: 0.4, vz: 0.05, g: -0.1, life: 2.5, max: 2.5, s0: 0.06, s1: 0.25, c0: new THREE.Color('#9a9a9a'), rot: 0, spin: 0 });
       }
@@ -908,7 +932,29 @@ export class Renderer {
     return g.allied(o, g.human) ? C_ALLY : C_ENEMY;
   }
 
-  private hpBar(x: number, y: number, z: number, frac: number, w: number, prog: number | null) {
+  /** Town centre advancing an age: scaffolding, a working crane hoisting stone, dust and a gold progress bar. */
+  private renovate(id: number, cx: number, h: number, cy: number, prog: number, team: THREE.Color | null, dt: number) {
+    const B = this.batches;
+    B.add('renov:main', cx, h, cy, 0, 1, 1, 1, team, null, 'lit', true);
+    const mx = cx + RENOV_MAST.x, my = h + RENOV_MAST.y, mz = cy + RENOV_MAST.z;
+    const yaw = 0.7 + Math.sin(this.time * 0.3 + id) * 0.9;
+    B.add('renov:jib', mx, my, mz, yaw, 1, 1, 1, null, null, 'lit', true);
+    const tx = mx + Math.cos(yaw) * 1.15, tz = mz - Math.sin(yaw) * 1.15;
+    // hoist cycle: the block rises from the yard to the jib and is lowered again
+    const ph = (this.time * 0.18 + id * 0.37) % 1;
+    const lift = ph < 0.5 ? ph * 2 : 2 - ph * 2;
+    const ly = h + 0.15 + lift * (RENOV_MAST.y - 0.75);
+    B.add('renov:load', tx, ly, tz, yaw, 1, 1, 1, null, null, 'lit', true);
+    const top = my - 0.06, len = Math.max(0.05, top - (ly + 0.22));
+    B.add('renov:rope', tx, ly + 0.22, tz, 0, 1, len, 1, null, null, 'lit', false);
+    if (Math.random() < dt * 0.9) {
+      const a = Math.random() * Math.PI * 2;
+      this.particles.push({ key: 'fx:puff', mat: 'lit', x: cx - 0.35 + Math.cos(a) * 1.5, y: h + 0.3 + Math.random() * 1.6, z: cy - 0.4 + Math.sin(a) * 1.0, vx: (Math.random() - 0.5) * 0.2, vy: 0.25, vz: (Math.random() - 0.5) * 0.2, g: -0.05, life: 1.6, max: 1.6, s0: 0.05, s1: 0.22, c0: C_DUST.clone(), rot: 0, spin: 0 });
+    }
+    this.hpBar(cx, h + 4.15, cy, 1, 1.6, prog, C_AGEUP);
+  }
+
+  private hpBar(x: number, y: number, z: number, frac: number, w: number, prog: number | null, progColor = C_PROG) {
     const B = this.batches;
     const q = this.camera.quaternion;
     const hgt = Math.max(0.05, this.zoom * 0.0045);
@@ -920,7 +966,7 @@ export class Renderer {
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
     tmpS.set(ww * f, hgt, 1);
     tmpM.compose(tmpV.set(x - right.x * ww * (1 - f) / 2, y - right.y * ww * (1 - f) / 2 + 0.001, z - right.z * ww * (1 - f) / 2), q, tmpS);
-    const col = prog !== null ? C_PROG : frac > 0.5 ? C_HP : frac > 0.25 ? C_HPLOW : C_HPCRIT;
+    const col = prog !== null ? progColor : frac > 0.5 ? C_HP : frac > 0.25 ? C_HPLOW : C_HPCRIT;
     B.addMatrix('fx:quad', tmpM, null, col, 'overlay', false);
   }
 
@@ -932,31 +978,35 @@ export class Renderer {
 
   /** Render a model to a small image (used for UI buttons and portraits). */
   icon(key: string, color: string, size = 96): string {
-    const ck = key + '|' + color + '|' + size;
+    const real = this.realism && this.assetsReady && !!this.realismAssets;
+    const ck = key + '|' + color + '|' + size + (real ? '|hd' : '');
     const hit = this.iconCache.get(ck);
     if (hit) return hit;
     if (!this.iconRT || this.iconRT.width !== size) {
       this.iconRT?.dispose();
       this.iconRT = new THREE.WebGLRenderTarget(size, size, { colorSpace: THREE.SRGBColorSpace, samples: 4 });
     }
-    const m = getModel(key);
+    const m = getModel(key, real);
+    const atlas = real ? this.realismAssets!.model : undefined;
     const scene = new THREE.Scene();
-    scene.add(new THREE.HemisphereLight('#ffffff', '#6a5a4a', 1.6));
-    const dl = new THREE.DirectionalLight('#fff4e0', 2.6);
+    if (real) { scene.environment = this.scene.environment; scene.environmentIntensity = 0.7; }
+    scene.add(new THREE.HemisphereLight('#ffffff', '#6a5a4a', real ? 1.25 : 1.6));
+    const dl = new THREE.DirectionalLight('#fff4e0', real ? 2.4 : 2.6);
     dl.position.set(-2, 4, 3);
     scene.add(dl);
-    let mat: THREE.Material = new THREE.MeshLambertMaterial({ vertexColors: true });
-    let tmat: THREE.Material = new THREE.MeshLambertMaterial({ vertexColors: true, color: new THREE.Color(color) });
+    let mat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    let tmat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    (tmat as THREE.MeshStandardMaterial).color = new THREE.Color(color);
     let base = m.base, team = m.team;
     if (m.rig) {
       const rig = m.rig;
-      mat = makeRigMaterial(rig, null);
-      const tm = makeRigMaterial(rig, null);
+      mat = makeRigMaterial(rig, null, atlas);
+      const tm = makeRigMaterial(rig, null, atlas);
       tm.color = new THREE.Color(color);
       tmat = tm;
       const prep = (g: THREE.BufferGeometry) => {
         const c = new THREE.BufferGeometry();
-        for (const k of ['position', 'normal', 'color', 'aBone', 'aTag']) c.setAttribute(k, g.getAttribute(k));
+        for (const k of ['position', 'normal', 'color', 'aBone', 'aTag', 'uv', 'aSurface']) if (g.getAttribute(k)) c.setAttribute(k, g.getAttribute(k));
         const n = g.getAttribute('position').count;
         const an = new Float32Array(n * 4), sh = new Float32Array(n * 2);
         const armed = rig.style > 0 || rig.mounted;
