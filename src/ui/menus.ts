@@ -97,9 +97,9 @@ export class Menus {
         <div class="sw" style="background:${PLAYER_COLORS[p.color]}" data-act="color" title="${PLAYER_COLOR_NAMES[p.color]}"></div>
         <input type="text" value="${esc(p.name)}" data-f="name" maxlength="16">
         <select data-f="civ">${civOpts(p.civ)}</select>
-        ${p.human ? '<div style="font-size:12px;color:var(--gold);text-align:center">Human</div>' : `<select data-f="diff">${DIFFS.map((d, k) => `<option value="${k}"${k === p.diff ? ' selected' : ''}>${d}</option>`).join('')}</select>`}
+        ${p.human ? '<div class="hum" style="font-size:12px;color:var(--gold);text-align:center">Human</div>' : `<select data-f="diff">${DIFFS.map((d, k) => `<option value="${k}"${k === p.diff ? ' selected' : ''}>${d}</option>`).join('')}</select>`}
         <select data-f="team"><option value="0"${p.team === 0 ? ' selected' : ''}>No team</option>${[1, 2, 3, 4].map((t) => `<option value="${t}"${p.team === t ? ' selected' : ''}>Team ${t}</option>`).join('')}</select>
-        ${p.human ? '<span></span>' : '<button class="x" data-act="del">✕</button>'}
+        ${p.human ? '<span class="xs"></span>' : '<button class="x" data-act="del" aria-label="Remove player">✕</button>'}
       </div>`).join('');
     const human = s.players.find((p) => p.human)!;
     const hc = human.civ === 'random' ? null : CIVS[human.civ];

@@ -273,7 +273,18 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 .prow select { min-height: 36px; font-size: 13.5px; padding: 2px 6px; width: 100%; }
 .prow .x { width: 32px; height: 32px; border-radius: 8px; border: 1px solid #7a3a2a; background: #3a1a14; cursor: pointer; }
 @media (max-width: 560px) {
-  .prow { grid-template-columns: 26px 1fr 1fr; }
+  /* phones: name on its own line, then civilisation + difficulty, then team + remove */
+  .prow {
+    grid-template-columns: 26px 1fr 1fr 34px;
+    grid-template-areas: "sw name name name" "civ civ diff diff" "team team team x";
+  }
+  .prow .sw { grid-area: sw; }
+  .prow [data-f=name] { grid-area: name; min-width: 0; }
+  .prow [data-f=civ] { grid-area: civ; min-width: 0; }
+  .prow [data-f=diff], .prow .hum { grid-area: diff; min-width: 0; }
+  .prow .hum { align-self: center; }
+  .prow [data-f=team] { grid-area: team; min-width: 0; }
+  .prow .x, .prow .xs { grid-area: x; }
 }
 .civinfo { font-size: 12.5px; color: #e0d6c0; background: #0004; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
 .civinfo b { color: var(--gold); }
