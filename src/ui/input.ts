@@ -8,7 +8,7 @@ export class Input {
   private mode: 'none' | 'pan' | 'box' | 'pinch' | 'pending' | 'rpan' = 'none';
   private longTimer = 0;
   private lastTap = { t: 0, x: 0, y: 0 };
-  private pinch = { d: 0, a: 0, mx: 0, my: 0, twist: 0, rotating: false };
+  private pinch = { d: 0, a: 0, mx: 0, my: 0, twist: 0, rotating: false, t: 0, travel: 0, d0: 0 };
   private keys = new Set<string>();
   private mouse = { x: -1, y: -1 };
   private moved = false;
@@ -47,7 +47,8 @@ export class Input {
       clearTimeout(this.longTimer);
       this.hideBox();
       const [a, b] = [...this.ptrs.values()];
-      this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), a: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, twist: 0, rotating: false };
+      const d0 = Math.hypot(a.x - b.x, a.y - b.y);
+      this.pinch = { d: d0, a: Math.atan2(b.y - a.y, b.x - a.x), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, twist: 0, rotating: false, t: performance.now(), travel: 0, d0 };
       this.mode = 'pinch';
       return;
     }
@@ -117,7 +118,7 @@ export class Input {
         if (this.pinch.rotating) r.rotate(-da);
         else if (app.prefs.twistRotate && Math.abs(this.pinch.twist += da) > 0.35) { this.pinch.rotating = true; r.rotate(-this.pinch.twist); }
       }
-      this.pinch = { ...this.pinch, d, a: ang, mx, my };
+      this.pinch = { ...this.pinch, d, a: ang, mx, my, travel: this.pinch.travel + Math.hypot(mx - this.pinch.mx, my - this.pinch.my) };
       return;
     }
     const thresh = p.type === 'mouse' ? 5 : 9;
@@ -150,6 +151,12 @@ export class Input {
     if (!this.ready) { this.mode = 'none'; return; }
     const app = this.app;
     if (this.mode === 'pinch') {
+      // a quick two-finger tap (no pan, pinch or twist) cancels the current mode or clears the selection
+      if (this.ptrs.size === 1 && performance.now() - this.pinch.t < 300 && this.pinch.travel < 12 && Math.abs(this.pinch.d - this.pinch.d0) < 14 && !this.pinch.rotating) {
+        this.pinch.t = 0;
+        if (app.mode.k !== 'normal') app.setMode({ k: 'normal' });
+        else if (app.view.selection.size) app.deselect();
+      }
       if (this.ptrs.size === 0) this.mode = 'none';
       return;
     }

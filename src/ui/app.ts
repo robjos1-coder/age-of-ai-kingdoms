@@ -413,23 +413,35 @@ export class App {
     }
   }
 
-  selectIdleVillager() {
+  /** Touch "shift": while on, tap orders are queued (waypoints, build chains). */
+  queueMode = false;
+
+  selectIdleVillager(all = false) {
     const g = this.game!;
     const idle = [...g.units.values()].filter((u) => u.o === g.human && u.t === 'villager' && u.dead === undefined && !u.inside && !u.task && u.idleT > 1);
     if (!idle.length) { this.hud.toast('No idle villagers.', undefined, 1500); return; }
+    if (all) {
+      this.select(idle.map((u) => u.id));
+      this.renderer!.lookAt(idle[0].x, idle[0].y);
+      this.hud.toast(`${idle.length} idle villager${idle.length > 1 ? 's' : ''} selected`, undefined, 1500);
+      return;
+    }
     const u = idle[this.idleCycle++ % idle.length];
     this.select([u.id]);
     this.renderer!.lookAt(u.x, u.y);
   }
 
-  selectArmy() {
+  /** All military, or (idleOnly, press-and-hold) just soldiers with nothing to do. */
+  selectArmy(idleOnly = false) {
     const g = this.game!;
     const ids = [...g.units.values()].filter((u) => {
       if (u.o !== g.human || u.dead !== undefined || u.inside) return false;
+      if (idleOnly && (u.task || u.q.length)) return false;
       const d = unitDef(u.t);
       return !d.cls.includes('villager') && u.t !== 'fishing_ship' && u.t !== 'trade_cog' && !d.cls.includes('animal');
     }).map((u) => u.id);
-    if (!ids.length) { this.hud.toast('You have no army.', undefined, 1500); return; }
+    if (!ids.length) { this.hud.toast(idleOnly ? 'No idle soldiers.' : 'You have no army.', undefined, 1500); return; }
+    if (idleOnly) this.hud.toast(`${ids.length} idle soldier${ids.length > 1 ? 's' : ''} selected`, undefined, 1500);
     this.select(ids);
   }
 
@@ -557,6 +569,7 @@ export class App {
 
   tapWorld(sx: number, sy: number, opts: { touch: boolean; shift?: boolean; double?: boolean }) {
     const g = this.game!, r = this.renderer!;
+    if (opts.touch && this.queueMode && this.ownUnits().length) opts = { ...opts, shift: true };
     const ground = r.groundAt(sx, sy);
     const m = this.mode;
     if (m.k === 'place') {
@@ -770,6 +783,15 @@ export class App {
       if (canFight) {
         out.push({ key: 'am', icon: ICON.attackmove, name: 'Attack Move', desc: 'Move and fight anything along the way.', act: () => this.setMode({ k: 'target', action: 'attackmove', label: 'Tap where to attack-move' }) });
         out.push({ key: 'patrol', icon: ICON.patrol, name: 'Patrol', desc: 'Patrol between here and a point.', act: () => this.setMode({ k: 'target', action: 'patrol', label: 'Tap the patrol point' }) });
+        const scouts = units.filter((u) => g.canScout(u));
+        if (scouts.length) {
+          const on = scouts.every((u) => u.task?.k === 'scout');
+          out.push({
+            key: 'scout', icon: ICON.scout, name: on ? 'Auto Scout (scouting…)' : 'Auto Scout', on,
+            desc: 'Explore the map by itself: circles your base first, then heads out, steering clear of enemy towers and town centres and veering away when attacked. Give any other order to stop.',
+            act: () => { g.cmdScout(me, scouts.map((u) => u.id)); this.hud.toast('Scouting automatically', 'gold', 1500); this.hud.dirty = true; play('click'); },
+          });
+        }
       }
       if (units.some((u) => ['mangonel', 'onager', 'trebuchet', 'bombard_cannon', 'cannon_galleon'].includes(u.t))) {
         out.push({ key: 'ag', icon: ICON.target, name: 'Attack Ground', desc: 'Bombard an area.', act: () => this.setMode({ k: 'target', action: 'attackground', label: 'Tap the ground to bombard' }) });
@@ -838,6 +860,12 @@ export class App {
       }
       if (b.gar.length) out.push({ key: 'ungar', icon: ICON.ungarrison, name: 'Ungarrison All', act: () => { g.cmdUngarrison(me, b.id); play('click'); } });
       if (b.t === 'town_center') {
+        const auto = !!b.autoVil;
+        out.push({
+          key: 'autovil', icon: ICON.autovil, name: auto ? 'Auto villagers: ON' : 'Auto villagers: OFF', on: auto,
+          desc: 'Keep training villagers whenever this Town Center is idle and you can afford them.',
+          act: () => { g.cmdAutoVillagers(me, b.id, !auto); this.hud.dirty = true; play('click'); },
+        });
         out.push({ key: 'bell', icon: ICON.bell, name: 'Ring Town Bell', desc: 'All villagers take shelter in nearby buildings.', act: () => { g.cmdTownBell(me, true); play('bell'); } });
         out.push({ key: 'clear', icon: ICON.allclear, name: 'All Clear', desc: 'Villagers return to work.', act: () => { g.cmdTownBell(me, false); play('click'); } });
       }

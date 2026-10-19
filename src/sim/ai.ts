@@ -28,6 +28,7 @@ const DIFF = [
   { name: 'Moderate', vils: 45, period: 1.6, firstAttack: 840, armyBase: 10, armyGrow: 3, feudalVils: 17, castleVils: 27, imperialVils: 38, maxProd: 2 },
   { name: 'Hard', vils: 65, period: 1.0, firstAttack: 600, armyBase: 9, armyGrow: 4, feudalVils: 19, castleVils: 30, imperialVils: 48, maxProd: 3 },
   { name: 'Hardest', vils: 75, period: 0.8, firstAttack: 540, armyBase: 10, armyGrow: 5, feudalVils: 20, castleVils: 32, imperialVils: 52, maxProd: 4 },
+  { name: 'Extreme', vils: 90, period: 0.55, firstAttack: 450, armyBase: 12, armyGrow: 6, feudalVils: 21, castleVils: 33, imperialVils: 58, maxProd: 5 },
 ];
 
 const ECO_TECHS: string[][] = [
@@ -57,7 +58,7 @@ export class AIController {
   load(d: unknown) { if (d) this.s = { ...this.s, ...(d as AIState) }; }
 
   get p(): Player { return this.game.players[this.id]; }
-  get diff() { return DIFF[Math.max(0, Math.min(3, this.p.diff))]; }
+  get diff() { return DIFF[Math.max(0, Math.min(DIFF.length - 1, this.p.diff))]; }
 
   tick(dt: number) {
     if (this.p.defeated) return;

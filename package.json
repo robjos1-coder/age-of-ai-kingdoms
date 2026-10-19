@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "check:graphics": "node --import tsx scripts/graphicscheck.ts",
     "check:viewport": "node --import tsx scripts/viewportcheck.ts",
-    "check:interaction": "node --import tsx scripts/interactioncheck.ts"
+    "check:interaction": "node --import tsx scripts/interactioncheck.ts",
+    "check:helpers": "node --import tsx scripts/helpercheck.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

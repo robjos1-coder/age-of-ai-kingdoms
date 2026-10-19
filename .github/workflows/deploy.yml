@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run check:viewport
       - run: npm run check:interaction
+      - run: npm run check:helpers
       - run: npm run check:graphics
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3

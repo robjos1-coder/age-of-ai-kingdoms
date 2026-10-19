@@ -46,6 +46,7 @@ export class Hud {
   <button class="side" id="sb-home" title="Town Center (H)">${ICON.home}</button>
   <button class="side hidden" id="sb-alert" title="Go to attack (Space)">${ICON.target}</button>
   <button class="side" id="sb-box" title="Box select">${ICON.box}</button>
+  <button class="side hidden" id="sb-queue" title="Queue orders (Shift)">${ICON.queue}</button>
   <button class="side" id="sb-desel" title="Deselect (Esc)">${ICON.close}</button>
   <button class="side" id="sb-collapse" title="Hide panel">${ICON.collapse}</button>
 </div>
@@ -62,7 +63,20 @@ export class Hud {
 <div id="toasts"></div>
 <div id="modebar" class="hidden"></div>
 <div id="selbox" class="hidden"></div>`);
-    const on = (id: string, f: () => void) => $(id).addEventListener('click', (e) => { e.stopPropagation(); play('click'); f(); });
+    const on = (id: string, f: () => void) => $(id).addEventListener('click', (e) => {
+      e.stopPropagation();
+      const el = $(id);
+      if (el.dataset.long === '1') { el.dataset.long = ''; return; } // a long press already acted
+      play('click'); f();
+    });
+    /** Press-and-hold action on a side button (touch and mouse). */
+    const onHold = (id: string, f: () => void) => {
+      const el = $(id);
+      let timer = 0;
+      el.addEventListener('pointerdown', () => { el.dataset.long = ''; timer = window.setTimeout(() => { el.dataset.long = '1'; play('click'); f(); }, 480); });
+      for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(ev, () => clearTimeout(timer));
+      el.addEventListener('contextmenu', (e) => e.preventDefault());
+    };
     on('btn-menu', () => this.app.menus.showPause());
     on('btn-pause', () => { this.app.paused = !this.app.paused; this.toast(this.app.paused ? 'Paused' : 'Resumed', undefined, 1000); });
     on('sb-idle', () => this.app.selectIdleVillager());
@@ -77,6 +91,13 @@ export class Hud {
       this.app.renderer?.lookAt(...g.epos(tc));
     });
     on('sb-army', () => this.app.selectArmy());
+    onHold('sb-idle', () => this.app.selectIdleVillager(true));
+    onHold('sb-army', () => this.app.selectArmy(true));
+    on('sb-queue', () => {
+      this.app.queueMode = !this.app.queueMode;
+      this.toast(this.app.queueMode ? 'Queue on: taps add waypoints and orders in sequence' : 'Queue off', undefined, 1800);
+      this.dirty = true;
+    });
     on('sb-home', () => this.app.goHome());
     on('sb-alert', () => this.app.jumpToAlert());
     on('sb-box', () => { this.app.boxMode = !this.app.boxMode; $('sb-box').classList.toggle('on', this.app.boxMode); if (this.app.boxMode) this.toast('Drag to select units', undefined, 1500); });
@@ -233,6 +254,10 @@ export class Hud {
     badge.textContent = String(idle);
     badge.classList.toggle('hidden', idle === 0);
     $('sb-alert').classList.toggle('hidden', !app.lastAlert || g.time - app.lastAlert.t > 30);
+    const hasUnits = app.ownUnits().length > 0;
+    if (!hasUnits) app.queueMode = false;
+    $('sb-queue').classList.toggle('hidden', !(isTouch() || app.touchInput) || !hasUnits);
+    $('sb-queue').classList.toggle('on', app.queueMode);
     $('btn-pause').innerHTML = app.paused ? ICON.speed : ICON.pause;
     this.updateInfo();
     this.updateCmds();
@@ -271,7 +296,7 @@ export class Hud {
         const caption = document.createElement('span');
         caption.className = 'cmd-caption';
         caption.setAttribute('aria-hidden', 'true');
-        caption.textContent = ({ eco: 'Build', mil: 'Military', rally: 'Rally', bell: 'Town bell', clear: 'All clear', ungar: 'Exit', am: 'Attack', ag: 'Bombard', reseed: 'Reseed' } as Record<string, string>)[c.key] ?? shortName(c.name);
+        caption.textContent = ({ eco: 'Build', mil: 'Military', rally: 'Rally', bell: 'Town bell', clear: 'All clear', ungar: 'Exit', am: 'Attack', ag: 'Bombard', reseed: 'Reseed', scout: 'Auto scout', autovil: 'Auto vills' } as Record<string, string>)[c.key] ?? shortName(c.name);
         slot.append(el, caption);
         box.appendChild(slot);
         return el;
@@ -757,7 +782,7 @@ const SHORT: Record<string, string> = {
   'Stone Gate': 'Gate', 'University': 'Univ.', 'Blacksmith': 'Smithy', 'Wheelbarrow': 'Barrow',
   'Hand Cart': 'Handcart', 'Town Watch': 'Watch', 'Town Patrol': 'Patrol', 'Fishing Ship': 'Fisher', 'Transport Ship': 'Transport',
   'Battering Ram': 'Ram', 'Scout Cavalry': 'Scout', 'Skirmisher': 'Skirm.', 'Man-at-Arms': 'M-at-Arms', 'Long Swordsman': 'Long Sw.',
-  'Cavalry Archer': 'Cav. Archer',
+  'Cavalry Archer': 'Cav. Archer', 'Stand Ground': 'Stand', 'Aggressive': 'Aggress.', 'Defensive': 'Defend',
 };
 /** Button caption: drop verbs and age suffixes, then use a short form for long names. */
 function shortName(name: string) {

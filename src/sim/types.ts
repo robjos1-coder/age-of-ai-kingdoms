@@ -2,7 +2,7 @@ import type { BuildingKey, CivId, GatherKind, NodeKind, ProjKind, Res, UnitClass
 
 export type TaskKind =
   | 'move' | 'attack' | 'gather' | 'build' | 'repair' | 'garrison' | 'heal' | 'convert'
-  | 'patrol' | 'relic' | 'unload' | 'follow' | 'attackGround';
+  | 'patrol' | 'relic' | 'unload' | 'follow' | 'attackGround' | 'scout';
 
 export interface Task {
   k: TaskKind;
@@ -77,6 +77,8 @@ export interface Unit {
   /** Formation slot offset for group moves. */
   ox?: number;
   oy?: number;
+  /** Game time this unit last called nearby comrades for help (throttle). */
+  helpT?: number;
 }
 
 export interface QueueItem {
@@ -110,6 +112,8 @@ export interface Building {
   burn?: number;
   /** Auto-reseed farms (mill / TC rally) */
   reseed?: boolean;
+  /** Keep training villagers whenever the queue is empty (town centre helper). */
+  autoVil?: boolean;
   /** Construction placeholder hp start */
   hp0?: number;
 }

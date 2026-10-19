@@ -15,7 +15,14 @@ const MAPS: [Settings['mapType'], string, string][] = [
   ['oasis', 'Oasis', 'Desert with a palm-ringed oasis in the centre.'],
 ];
 const SIZES: [number, string][] = [[96, 'Tiny (96)'], [120, 'Small (120)'], [144, 'Medium (144)'], [168, 'Large (168)']];
-const DIFFS = ['Easy', 'Moderate', 'Hard', 'Hardest'];
+const DIFFS = ['Easy', 'Moderate', 'Hard', 'Hardest', 'Extreme'];
+const DIFF_DESC = [
+  'Slow, relaxed opponents that gather 20% slower and attack late. Good for learning.',
+  'A fair fight at normal gather rates.',
+  'Faster decisions, a stronger economy (+10% gathering) and earlier attacks.',
+  'Booms hard (+25% gathering), multiple production buildings and steady pressure.',
+  'Relentless: very fast decisions, +40% gathering, early and growing attacks.',
+];
 const SETUP_KEY = 'aoak-setup';
 
 export class Menus {
@@ -98,6 +105,10 @@ export class Menus {
     const hc = human.civ === 'random' ? null : CIVS[human.civ];
     this.open(`
       <h2>New Game</h2>
+      <div class="grid2">
+        <label class="f">AI difficulty (all opponents)<select id="s-diff">${DIFFS.map((d, k) => `<option value="${k}"${s.players.filter((p) => !p.human).every((p) => p.diff === k) ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+        <div class="civinfo" id="s-diffdesc" style="margin:0">${DIFF_DESC[s.players.find((p) => !p.human)?.diff ?? 1]}</div>
+      </div>
       <h3>Players</h3>
       ${rows}
       <div class="row"><button class="btn small" id="s-add" ${s.players.length >= 6 ? 'disabled' : ''}>+ Add AI opponent</button></div>
@@ -158,6 +169,11 @@ export class Menus {
     });
     q('#s-map').addEventListener('change', (e) => { s.mapType = (e.target as HTMLSelectElement).value as Settings['mapType']; q('#s-mapdesc').textContent = MAPS.find((m) => m[0] === s.mapType)?.[2] ?? ''; });
     q('#s-size').addEventListener('change', (e) => { s.mapSize = +(e.target as HTMLSelectElement).value; });
+    q('#s-diff').addEventListener('change', (e) => {
+      const k = +(e.target as HTMLSelectElement).value;
+      for (const p of s.players) if (!p.human) p.diff = k;
+      this.showSetup();
+    });
     this.on('#s-back', () => this.showMain());
     this.on('#s-start', () => {
       s.startRes = (q<HTMLSelectElement>('#s-res')).value as Settings['startRes'];

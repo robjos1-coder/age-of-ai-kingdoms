@@ -732,6 +732,7 @@ export class Game {
         case 'relic': this.taskRelic(u, dt, speed); break;
         case 'unload': this.taskUnload(u, dt, speed); break;
         case 'follow': this.taskFollow(u, dt, speed); break;
+        case 'scout': this.taskScout(u, dt, speed); break;
       }
     } else {
       u.idleT += dt;
@@ -746,7 +747,7 @@ export class Game {
         if (moved < 0.08) { u.stuck++; u.path = null; }
         else u.stuck = Math.max(0, u.stuck - 1);
         u.lx = u.x; u.ly = u.y;
-        if (u.stuck > 6) { u.stuck = 0; this.endTask(u); }
+        if (u.stuck > 6) { u.stuck = 0; if (u.task?.k === 'scout') { u.task.x = undefined; u.path = null; } else this.endTask(u); }
       }
     }
   }
@@ -757,6 +758,138 @@ export class Game {
     u.sub = 0;
     u.conv = undefined;
     if (u.anim === 'walk' || u.anim === 'work') u.anim = 'idle';
+  }
+
+  /** Combat role used for "similar units join in" (null: never assists, e.g. villagers, monks, rams). */
+  private role(t: UnitKey): string | null {
+    const c = unitDef(t).cls;
+    if (c.includes('villager') || c.includes('monk') || c.includes('animal') || c.includes('trade') || c.includes('ram')) return null;
+    if (c.includes('ship')) return unitDef(t).naval ? 'ship' : null;
+    if (c.includes('siege')) return 'siege';
+    if (c.includes('archer')) return 'ranged';
+    if (c.includes('cavalry') || c.includes('camel')) return 'cav';
+    if (c.includes('infantry')) return 'inf';
+    return null;
+  }
+
+  /** Idle units of this owner near (x, y) that could join a fight: not garrisoned, not told to hold or stay passive. */
+  private idleFighters(o: number, x: number, y: number, r: number, fn: (v: Unit, role: string) => void) {
+    this.unitsNear(x, y, r, (v) => {
+      if (v.o !== o || v.task || v.q.length || v.inside || v.dead !== undefined) return;
+      if (v.stance === 2 || v.stance === 3) return;
+      const role = this.role(v.t);
+      if (!role || unitStats(this.players[o], v.t).atk <= 0) return;
+      fn(v, role);
+    });
+  }
+
+  /** AoE-style group response: when units are sent to attack, idle units of the same kind nearby join in. */
+  assist(o: number, attackers: Unit[], tgt: Unit | Building, radius = 6) {
+    const roles = new Set(attackers.map((u) => this.role(u.t)).filter((r): r is string => !!r));
+    if (!roles.size) return;
+    let cx = 0, cy = 0;
+    for (const u of attackers) { cx += u.x; cy += u.y; }
+    cx /= attackers.length; cy /= attackers.length;
+    this.idleFighters(o, cx, cy, radius, (v, role) => {
+      if (!roles.has(role)) return;
+      if (role === 'siege' && tgt.k === 'u') return; // siege only joins sieges
+      v.hx = v.x; v.hy = v.y;
+      v.task = { k: 'attack', id: tgt.id };
+    });
+  }
+
+  /** Someone of ours (unit or building) was hit: idle soldiers close by come to help, whatever their kind. */
+  private callForHelp(victim: Unit | Building, src: Unit) {
+    if (victim.k === 'u') {
+      if (this.time - (victim.helpT ?? -9) < 1.5) return;
+      victim.helpT = this.time;
+    }
+    const [x, y] = this.epos(victim);
+    this.idleFighters(victim.o, x, y, victim.k === 'b' ? 7 : 5, (v, role) => {
+      if (role === 'siege' || role === 'ship') return;
+      v.hx = v.x; v.hy = v.y;
+      v.task = { k: 'attack', id: src.id };
+    });
+  }
+
+  /** Explored-tile map for an owner (only the human keeps one; AIs see the whole map). */
+  private exploredFor(o: number) {
+    return o === this.human && this.settings.reveal === 'normal' ? this.explored : null;
+  }
+
+  /** Auto-scout: head for the nearest unexplored ground (biased to stay near home first), keep clear of
+   *  enemy defences, and veer away from whatever last attacked us. */
+  private taskScout(u: Unit, dt: number, speed: number) {
+    const t = u.task!;
+    const g = this.grid, S = g.size;
+    const exp = this.exploredFor(u.o);
+    u.scan -= dt;
+    const reached = t.x !== undefined && exp !== null && exp[Math.floor(t.y!) * S + Math.floor(t.x!)] === 1 && u.scan <= 0;
+    if (t.x === undefined || reached) {
+      u.scan = 1.5;
+      const next = this.pickScoutTarget(u, t);
+      if (!next) {
+        this.endTask(u);
+        if (u.o === this.human) this.events.push({ k: 'msg', o: u.o, text: 'Scouting complete: the whole map is explored.' });
+        return;
+      }
+      t.x = next[0]; t.y = next[1];
+      u.path = null;
+    }
+    const r = this.goTo(u, { x0: t.x!, y0: t.y!, x1: t.x!, y1: t.y!, range: 1.2 }, dt, speed);
+    if (r !== 'moving') { t.x = undefined; u.path = null; }
+  }
+
+  private pickScoutTarget(u: Unit, t: Task): [number, number] | null {
+    const g = this.grid, S = g.size;
+    if (g.regionDirty) g.computeRegions();
+    const exp = this.exploredFor(u.o);
+    const reg = g.region[Math.floor(u.y) * S + Math.floor(u.x)];
+    const home = [...this.buildings.values()].find((b) => b.o === u.o && b.t === 'town_center');
+    const [hx, hy] = home ? this.bcenter(home) : [u.x, u.y];
+    // enemy defences we know about
+    const danger: [number, number, number][] = [];
+    for (const b of this.buildings.values()) {
+      if (!this.enemy(u.o, b.o) || !buildingDef(b.t).atk) continue;
+      if (exp && !exp[Math.floor(b.y) * S + Math.floor(b.x)]) continue;
+      const [bx, by] = this.bcenter(b);
+      danger.push([bx, by, (buildingStats(this.players[b.o], b.t).range || 7) + 2.5]);
+    }
+    const ok = (i: number) => g.region[i] === reg && g.landOk(i) && (!exp || !exp[i]);
+    const score = (x: number, y: number) => {
+      let s = Math.hypot(x - u.x, y - u.y) + 0.45 * Math.hypot(x - hx, y - hy);
+      for (const [dx, dy, r] of danger) if (Math.hypot(x - dx, y - dy) < r) s += 1000;
+      if (t.x2 !== undefined && Math.hypot(x - t.x2, y - t.y2!) < 9) s += 60;
+      return s;
+    };
+    let best: [number, number] | null = null, bestS = Infinity;
+    for (let k = 0; k < 140; k++) {
+      const i = Math.floor(this.rnd() * S * S);
+      if (!ok(i)) continue;
+      const x = (i % S) + 0.5, y = Math.floor(i / S) + 0.5, s = score(x, y);
+      if (s < bestS) { bestS = s; best = [x, y]; }
+    }
+    if (best) return best;
+    // nearly everything explored: sweep the grid for the last pockets
+    for (let i = 0; i < S * S; i += 3) {
+      if (!ok(i)) continue;
+      const x = (i % S) + 0.5, y = Math.floor(i / S) + 0.5, s = score(x, y);
+      if (s < bestS) { bestS = s; best = [x, y]; }
+    }
+    return exp ? best : best ?? [this.rnd() * S, this.rnd() * S];
+  }
+
+  cmdScout(o: number, ids: number[]) {
+    for (const u of this.ownUnits(o, ids)) {
+      if (!this.canScout(u)) continue;
+      u.q = [];
+      this.assign(u, { k: 'scout' }, false);
+    }
+  }
+
+  canScout(u: Unit) {
+    const d = unitDef(u.t);
+    return !d.naval && d.speed >= 1.2 && (d.cls.includes('cavalry') || d.cls.includes('camel')) && !d.cls.includes('cavarcher');
   }
 
   private idleBehaviour(u: Unit, d: ReturnType<typeof unitDef>, st: ReturnType<typeof unitStats>, dt: number) {
@@ -1028,6 +1161,10 @@ export class Game {
       else this.destroyBuilding(tgt, o);
       return;
     }
+    // nearby idle soldiers come to the defence of units and buildings under attack
+    if (src && src.dead === undefined && tgt.o !== 0 && src.o !== 0 && this.enemy(tgt.o, src.o)) this.callForHelp(tgt, src);
+    // a scout under fire veers away from its attacker and picks somewhere else to explore
+    if (tgt.k === 'u' && src && tgt.task?.k === 'scout') { tgt.task.x2 = src.x; tgt.task.y2 = src.y; tgt.task.x = undefined; }
     // retaliation
     if (tgt.k === 'u' && src && src.dead === undefined && !tgt.inside) {
       const td = unitDef(tgt.t);
@@ -1410,7 +1547,7 @@ export class Game {
     u.gk = kind;
     u.last = tgt.id;
     let rate = GATHER_RATE[kind] * eco(p, `gather_${kind}` as 'gather_wood');
-    if (!p.human) rate *= [0.85, 1, 1.1, 1.25][p.diff] ?? 1;
+    if (!p.human) rate *= [0.8, 1, 1.1, 1.25, 1.4][p.diff] ?? 1;
     if (this.aegis.has(u.o)) rate *= 10;
     let amt = Math.min(rate * dt, cap - u.ca);
     if (tgt.k === 'r') {
@@ -1743,6 +1880,7 @@ export class Game {
     if (!b.done) return;
     const d = buildingDef(b.t);
     const bs = buildingStats(p, b.t);
+    if (b.autoVil && b.q.length === 0 && p.pop < p.popCap) this.cmdTrain(b.o, b.id, 'villager', 1);
     // production / research
     if (b.q.length) {
       const item = b.q[0];
@@ -2180,6 +2318,9 @@ export class Game {
       if (st.atk > 0) { this.assign(u, { k: 'attack', id: tu.id }, queue); did = 'attack'; }
       else moveTo(u);
     }
+    if (did === 'attack' && !queue && (tgt.k === 'u' || tgt.k === 'b') && this.enemy(o, tgt.o) && !(tgt.k === 'u' && this.isAnimal(tgt))) {
+      this.assist(o, us.filter((u) => u.task?.k === 'attack' && u.task.id === tgt.id), tgt);
+    }
     return did;
   }
 
@@ -2194,6 +2335,11 @@ export class Game {
       const d = unitDef(u.t);
       if (d.proj === 'stone' || d.proj === 'cannon') this.assign(u, { k: 'attackGround', x, y }, false);
     }
+  }
+
+  cmdAutoVillagers(o: number, bid: number, on: boolean) {
+    const b = this.buildings.get(bid);
+    if (b && b.o === o && b.t === 'town_center') b.autoVil = on;
   }
 
   cmdStop(o: number, ids: number[]) {
