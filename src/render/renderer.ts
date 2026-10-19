@@ -986,16 +986,19 @@ export class Renderer {
       this.iconRT?.dispose();
       this.iconRT = new THREE.WebGLRenderTarget(size, size, { colorSpace: THREE.SRGBColorSpace, samples: 4 });
     }
-    const m = getModel(key, real);
-    const atlas = real ? this.realismAssets!.model : undefined;
+    // buildings use the detailed geometry in flat painted colours: scan textures turn to noise at button size
+    const flatB = real && key.startsWith('b:');
+    const m = getModel(key, real, flatB);
+    const atlas = real && !flatB ? this.realismAssets!.model : undefined;
     const scene = new THREE.Scene();
-    if (real) { scene.environment = this.scene.environment; scene.environmentIntensity = 0.7; }
+    if (atlas) { scene.environment = this.scene.environment; scene.environmentIntensity = 0.7; }
     scene.add(new THREE.HemisphereLight('#ffffff', '#6a5a4a', real ? 1.25 : 1.6));
     const dl = new THREE.DirectionalLight('#fff4e0', real ? 2.4 : 2.6);
     dl.position.set(-2, 4, 3);
     scene.add(dl);
-    let mat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : new THREE.MeshLambertMaterial({ vertexColors: true });
-    let tmat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    const plain = () => flatB ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    let mat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : plain();
+    let tmat: THREE.Material = atlas ? makeRealismMaterial(atlas, null) : plain();
     (tmat as THREE.MeshStandardMaterial).color = new THREE.Color(color);
     let base = m.base, team = m.team;
     if (m.rig) {

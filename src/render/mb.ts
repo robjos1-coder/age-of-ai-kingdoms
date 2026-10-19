@@ -25,8 +25,8 @@ export class MB {
   private base: Buf = { pos: [], nor: [], col: [], bone: [], tag: [], uv: [], surface: [] };
   private team: Buf = { pos: [], nor: [], col: [], bone: [], tag: [], uv: [], surface: [] };
   surfaces = new Map<Col, Surface>();
-  constructor(public realistic = false, public context = 'unit') {
-    if (realistic) this.jitter = 0.012;
+  constructor(public realistic = false, public context = 'unit', public flat = false) {
+    if (realistic) this.jitter = flat ? 0.02 : 0.012;
   }
   /** Skeleton joint that subsequently added geometry is attached to (0 = static). */
   bone = 0;
@@ -85,7 +85,7 @@ export class MB {
     const slot = SURFACE[surface];
     const card = surface === 'foliage';
     const guv = card ? g.getAttribute('uv') : null;
-    if (this.realistic && !['leaf', 'skin', 'cloth', 'leather', 'wool', 'foliage'].includes(surface)) {
+    if (this.realistic && !this.flat && !['leaf', 'skin', 'cloth', 'leather', 'wool', 'foliage'].includes(surface)) {
       // gold's scan is a grey metal plate, so its colour must come from the vertex tint
       tmpC.lerp(WHITE, surface === 'gold' ? 0.12 : surface === 'rock' ? 0.2 : surface === 'slate' ? 0.32 : surface === 'tile' ? 0.6 : surface === 'thatch' ? 0.65 : 0.8);
     }

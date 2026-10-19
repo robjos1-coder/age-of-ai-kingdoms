@@ -18,12 +18,13 @@ export interface ModelGeo {
 
 const cache = new Map<string, ModelGeo>();
 
-export function getModel(key: string, realistic = false): ModelGeo {
-  const cacheKey = `${realistic ? 'real:' : 'classic:'}${key}`;
+/** flat: the detailed (realistic) geometry in its plain painted colours, for clean UI icons without scan textures. */
+export function getModel(key: string, realistic = false, flat = false): ModelGeo {
+  const cacheKey = `${flat ? 'flat:' : realistic ? 'real:' : 'classic:'}${key}`;
   let m = cache.get(cacheKey);
   if (m) return m;
   const context = /^(b:|renov:|scaffold:|found:|rubble:)/.test(key) ? 'building' : /^(tree:|n:|d:)/.test(key) ? 'natural' : key.startsWith('fx:') ? 'effect' : 'unit';
-  const mb = new MB(realistic, context);
+  const mb = new MB(realistic || flat, context, flat);
   let rig: Rig | undefined;
   if (key.startsWith('r:')) {
     const [, t, raw] = key.split(':');
