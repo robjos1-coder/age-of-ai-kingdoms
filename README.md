@@ -69,7 +69,8 @@ Pushing to `main` builds and publishes to GitHub Pages via `.github/workflows/de
 
 ## Credits
 
-- Inspired by and forked in spirit from [alexvilelabah/age-of-ai](https://github.com/alexvilelabah/age-of-ai) (MIT). The music tracks in `public/music/` come from that project.
+- Inspired by and forked in spirit from [alexvilelabah/age-of-ai](https://github.com/alexvilelabah/age-of-ai) (MIT). The original music tracks in `public/music/` come from that project.
+- Extra medieval music (Settings → Extra music tracks) by RandomMind, CodeManu and Spring, released [CC0](https://creativecommons.org/publicdomain/zero/1.0/) on [OpenGameArt](https://opengameart.org). See [music credits](public/music/CREDITS.md).
 - Built with [Three.js](https://threejs.org) and [Vite](https://vitejs.dev).
 - Photographic surface scans and daylight environment from [Poly Haven](https://polyhaven.com), licensed [CC0](https://polyhaven.com/license). Asset import powered by the [Poly Haven API](https://polyhaven.com/our-api). See [the source manifest](public/realism/sources.json) and [asset credits](public/realism/CREDITS.md).
 - Age of Empires is a trademark of Microsoft; this is an unaffiliated fan project with original code and art.

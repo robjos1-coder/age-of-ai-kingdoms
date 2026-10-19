@@ -7,7 +7,7 @@ if (location.hash.startsWith('#gallery')) {
   void import('./gallery').then((m) => m.runGallery(location.hash.split('=')[1] ?? ''));
 } else {
   const app = new App();
-  Object.assign(audioSettings, { sfx: app.prefs.sfx, music: app.prefs.music, muted: app.prefs.muted });
+  Object.assign(audioSettings, { sfx: app.prefs.sfx, music: app.prefs.music, muted: app.prefs.muted, extraMusic: app.prefs.extraMusic });
   applyAudioSettings();
   app.menus.showMain();
   music.play('menu');

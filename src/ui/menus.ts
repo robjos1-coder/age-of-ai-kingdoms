@@ -287,6 +287,7 @@ export class Menus {
         <label class="f">Game speed<select id="o-speed"><option value="1">Slow (1.0×)</option><option value="1.5">Normal (1.5×)</option><option value="1.7">AoE2 Normal (1.7×)</option><option value="2">Fast (2.0×)</option><option value="3">Very fast (3.0×)</option></select></label>
         <label class="f">Sound effects<input type="range" id="o-sfx" min="0" max="1" step="0.05"></label>
         <label class="f">Music<input type="range" id="o-music" min="0" max="1" step="0.05"></label>
+        <label class="f"><span><input type="checkbox" id="o-xmusic"> Extra music tracks</span><small class="sub">Eight more medieval pieces (lute, feasts, battle drums and a victory fanfare), all CC0 public domain. Turn off for the original soundtrack only.</small></label>
         <label class="f">One-finger drag (touch)<select id="o-finger"><option value="pan">Scroll the map</option><option value="select">Box-select units</option></select></label>
         <label class="f"><span><input type="checkbox" id="o-twist"> Twist two fingers to rotate</span></label>
         <label class="f"><span><input type="checkbox" id="o-mute"> Mute all audio</span></label>
@@ -305,6 +306,7 @@ export class Menus {
     q<HTMLInputElement>('#o-sfx').value = String(pr.sfx);
     q<HTMLInputElement>('#o-music').value = String(pr.music);
     q<HTMLInputElement>('#o-mute').checked = pr.muted;
+    q<HTMLInputElement>('#o-xmusic').checked = pr.extraMusic;
     q<HTMLSelectElement>('#o-finger').value = pr.oneFinger;
     q<HTMLInputElement>('#o-twist').checked = pr.twistRotate;
     q<HTMLInputElement>('#o-hk').checked = pr.showHotkeys;
@@ -321,6 +323,8 @@ export class Menus {
       pr.sfx = +q<HTMLInputElement>('#o-sfx').value;
       pr.music = +q<HTMLInputElement>('#o-music').value;
       pr.muted = q<HTMLInputElement>('#o-mute').checked;
+      const xm = q<HTMLInputElement>('#o-xmusic').checked;
+      if (xm !== pr.extraMusic) { pr.extraMusic = xm; audioSettings.extraMusic = xm; music.refresh(); }
       pr.oneFinger = q<HTMLSelectElement>('#o-finger').value as typeof pr.oneFinger;
       pr.twistRotate = q<HTMLInputElement>('#o-twist').checked;
       pr.showHotkeys = q<HTMLInputElement>('#o-hk').checked;

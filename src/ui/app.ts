@@ -46,6 +46,8 @@ export interface Prefs {
   fullRes: boolean;
   sfx: number;
   music: number;
+  /** Include the extra (CC0 medieval) music tracks. */
+  extraMusic: boolean;
   muted: boolean;
   speed: number;
   showHotkeys: boolean;
@@ -90,7 +92,7 @@ export class App {
 
   constructor() {
     this.canvas = document.getElementById('game') as HTMLCanvasElement;
-    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, showFps: false, fullRes: false, sfx: 0.7, music: 0.35, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
+    this.prefs = { quality: defaultQuality(), realism: true, haze: true, perspective: true, showFps: false, fullRes: false, sfx: 0.7, music: 0.35, extraMusic: true, muted: false, speed: 1.7, showHotkeys: !isTouch(), edgeScroll: false, oneFinger: 'pan', twistRotate: true };
     try { Object.assign(this.prefs, JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}')); } catch { /* ignore */ }
     this.hud = new Hud(this);
     this.input = new Input(this);
@@ -302,7 +304,7 @@ export class App {
           if (e.o) this.hud.toast(e.text!, e.o === me ? 'bad' : 'gold', 6000);
           else { play('defeat'); music.play('end'); }
           break;
-        case 'victory': play('victory'); music.play('end'); break;
+        case 'victory': play('victory'); music.play('victory'); break;
         case 'msg': case 'relic': case 'wonder':
           if (e.text && (e.o === undefined || e.o === me || e.k !== 'msg')) this.hud.toast(e.text, e.k === 'msg' ? undefined : 'gold', 4000);
           break;

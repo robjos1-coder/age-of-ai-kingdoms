@@ -6,7 +6,8 @@ let sfxGain: GainNode | null = null;
 let noiseBuf: AudioBuffer | null = null;
 const last = new Map<string, number>();
 
-export const audioSettings = { sfx: 0.7, music: 0.35, muted: false };
+/** extraMusic: include the CC0 medieval pack (see public/music/CREDITS.md) in the playlists. */
+export const audioSettings = { sfx: 0.7, music: 0.35, muted: false, extraMusic: true };
 
 export function initAudio() {
   if (ctx) { if (ctx.state === 'suspended') void ctx.resume(); return; }
@@ -124,26 +125,48 @@ const TRACKS = {
   game: ['music/musicadefundodojogo.mp3', 'music/musicafundojogo2.mp3', 'music/musicafundojogo3.mp3'],
   battle: ['music/musicaataque.mp3'],
   end: ['music/fimdejogo.mp3'],
+  victory: ['music/fimdejogo.mp3'],
 };
+/** CC0 medieval pack (RandomMind, CodeManu, Spring — OpenGameArt), toggled by Settings → Extra music. */
+const EXTRA: Record<keyof typeof TRACKS, string[]> = {
+  menu: ['music/x_legend_will_rise.mp3'],
+  game: ['music/x_bards_tale.mp3', 'music/x_kings_feast.mp3', 'music/x_minstrel_dance.mp3', 'music/x_old_tower_inn.mp3', 'music/x_legend_will_rise.mp3'],
+  battle: ['music/x_medieval_battle.mp3', 'music/x_war_theme.mp3'],
+  end: [],
+  victory: ['music/x_victory.mp3'],
+};
+type MusicMode = keyof typeof TRACKS;
+
+function playlist(mode: MusicMode) {
+  if (!audioSettings.extraMusic) return TRACKS[mode];
+  // the victory fanfare comes first when the pack is on
+  return mode === 'victory' ? [...EXTRA.victory, ...TRACKS.victory] : [...TRACKS[mode], ...EXTRA[mode]];
+}
 
 class Music {
   el: HTMLAudioElement | null = null;
-  mode: keyof typeof TRACKS | null = null;
+  mode: MusicMode | null = null;
   idx = 0;
 
-  play(mode: keyof typeof TRACKS) {
+  play(mode: MusicMode) {
     if (this.mode === mode && this.el && !this.el.paused) return;
     this.mode = mode;
-    this.idx = Math.floor(Math.random() * TRACKS[mode].length);
+    this.idx = mode === 'victory' ? 0 : Math.floor(Math.random() * playlist(mode).length);
     this.start();
+  }
+
+  /** Playlist changed (extra music toggled): carry on with the current track, pick from the new list next. */
+  refresh() {
+    if (this.mode && this.el) this.idx = Math.floor(Math.random() * playlist(this.mode).length);
   }
 
   private start() {
     if (!this.mode) return;
     this.el?.pause();
-    const el = new Audio(TRACKS[this.mode][this.idx % TRACKS[this.mode].length]);
+    const list = playlist(this.mode);
+    const el = new Audio(list[this.idx % list.length]);
     el.volume = audioSettings.muted ? 0 : audioSettings.music;
-    el.loop = this.mode === 'menu';
+    el.loop = list.length === 1 && this.mode === 'menu';
     el.onended = () => { this.idx++; this.start(); };
     el.onerror = () => { /* missing file: stay silent */ };
     this.el = el;
