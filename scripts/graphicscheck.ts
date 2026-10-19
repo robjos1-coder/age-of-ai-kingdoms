@@ -17,10 +17,10 @@ for (const type of Object.keys(UNITS)) {
 }
 for (const sex of ['m', 'f']) for (const lod of ['', '@1']) keys.push(`r:villager:${sex}${lod}`);
 keys.push('u:trebuchet:idle:packed');
-for (let v = 0; v < 6; v++) keys.push(`tree:${v}:`, `tree:${v}:palm`);
+for (let v = 0; v < 6; v++) keys.push(`tree:${v}:`, `tree:${v}:palm`, `tree:${v}:arid`);
 for (let v = 0; v < 6; v++) for (const lod of [1, 2]) keys.push(`tree:${v}::${lod}`, `tree:${v}:palm:${lod}`);
 for (const type of ['stump', 'berry', 'gold', 'stone', 'fish', 'relic']) for (let v = 0; v < 5; v++) keys.push(`n:${type}:${v}`);
-for (const type of ['grass', 'flower', 'rock', 'bush', 'reed', 'cactus']) for (let v = 0; v < 4; v++) keys.push(`d:${type}:${v}`);
+for (const type of ['grass', 'flower', 'rock', 'bush', 'reed', 'cactus', 'drygrass', 'scrub']) for (let v = 0; v < 4; v++) keys.push(`d:${type}:${v}`);
 for (const size of [1, 2, 3, 4, 5]) keys.push(`found:${size}`, `scaffold:${size}:2`, `rubble:${size}`);
 
 for (const key of keys) {

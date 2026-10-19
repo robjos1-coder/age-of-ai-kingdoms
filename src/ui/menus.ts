@@ -7,7 +7,7 @@ interface SetupPlayer { civ: CivId | 'random'; human: boolean; team: number; dif
 
 const AI_NAMES = ['Charlemagne', 'Joan of Arc', 'Saladin', 'Genghis Khan', 'Barbarossa', 'Richard', 'Tamerlane', 'Ragnar', 'Justinian', 'Oda Nobunaga', 'Cyrus', 'Wu Zetian', 'El Cid', 'Harald'];
 const MAPS: [Settings['mapType'], string, string][] = [
-  ['arabia', 'Arabia', 'Open land with hills and scattered woods. Fast, aggressive games.'],
+  ['arabia', 'Arabia', 'Dry, open land: dusty plains, patchy grass, low hills and scattered woods. Fast, aggressive games.'],
   ['black_forest', 'Black Forest', 'Dense forest with narrow paths. Great for walling and booming.'],
   ['lakes', 'Lakes', 'A central lake and ponds full of fish. Docks pay off.'],
   ['coastal', 'Coastal', 'Land ringed by the sea. Fishing and warships matter.'],

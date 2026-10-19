@@ -237,7 +237,8 @@ const STYLES: Style[] = [
 ];
 
 function plinth(mb: MB, w: number, d: number, st: Style, h = 0.12) {
-  mb.box(w, h + 0.5, d, st.base, 0, h / 2 - 0.25, 0);
+  // deep footing so buildings on slopes show a stone foundation downhill instead of floating
+  mb.box(w, h + 1.7, d, st.base, 0, h / 2 - 0.85, 0);
 }
 
 function windows(mb: MB, w: number, d: number, y: number, st: Style, n = 2, side = true) {
@@ -706,7 +707,7 @@ function rubbleModel(mb: MB, s: number) {
 
 function tree(mb: MB, v: number, biome: string, lod = 0) {
   if (mb.realistic) return realisticTree(mb, v, biome, lod);
-  const kind = biome === 'palm' ? (v % 3 === 0 ? 1 : 3) : v % 3;
+  const kind = biome === 'palm' ? (v % 3 === 0 ? 1 : 3) : biome === 'arid' ? 1 : v % 3;
   const s = 0.85 + ((v * 7) % 10) / 30;
   mb.push(0, 0, 0, 0, (v % 6) * 1.1, 0, s);
   if (kind === 3) {
@@ -777,6 +778,12 @@ function deco(mb: MB, t: string, v: number) {
   switch (t) {
     case 'grass':
       for (let i = 0; i < 4; i++) mb.cone(0.03, 0.18, 3, i % 2 ? '#5f9a35' : '#6fae3d', Math.cos(i * 1.7 + v) * 0.08, 0.09, Math.sin(i * 1.7 + v) * 0.08, { rz: (i - 1.5) * 0.25 });
+      break;
+    case 'drygrass':
+      for (let i = 0; i < 4; i++) mb.cone(0.03, 0.2, 3, i % 2 ? '#b8a466' : '#9c9456', Math.cos(i * 1.7 + v) * 0.08, 0.1, Math.sin(i * 1.7 + v) * 0.08, { rz: (i - 1.5) * 0.3 });
+      break;
+    case 'scrub':
+      for (let i = 0; i < 3; i++) mb.ball(0.09, i % 2 ? '#7e8050' : '#8a8a58', Math.cos(i * 2.1 + v) * 0.08, 0.09, Math.sin(i * 2.1 + v) * 0.08, {}, 0.7);
       break;
     case 'flower':
       mb.cone(0.02, 0.14, 3, '#5f9a35', 0, 0.07, 0);

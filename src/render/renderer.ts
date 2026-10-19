@@ -165,8 +165,8 @@ export class Renderer {
     };
     this.batches = new Batches(this.scene, this.mats, this.fog, realism, this.realismAssets?.model, this.wind);
     this.batches.setShadows(quality !== 'low');
-    this.biome = game.settings.mapType === 'oasis' ? 'palm' : '';
-    this.terrain = new Terrain(this.scene, game.grid, this.fog, game.settings.mapType === 'oasis', this.realismAssets?.ground, game.settings.mapType !== 'oasis');
+    this.biome = game.settings.mapType === 'oasis' ? 'palm' : game.settings.mapType === 'arabia' ? 'arid' : '';
+    this.terrain = new Terrain(this.scene, game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.biome === '', this.biome === 'arid');
     this.configureLighting();
     for (const p of game.players) this.teamColors[p.id] = new THREE.Color(p.color);
     this.resize();
@@ -237,7 +237,7 @@ export class Renderer {
     this.mats.lit = lit;
     this.batches = new Batches(this.scene, this.mats, this.fog, this.realism, this.realismAssets?.model, this.wind);
     this.batches.setShadows(this.quality !== 'low');
-    this.terrain = new Terrain(this.scene, this.game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.game.settings.mapType !== 'oasis');
+    this.terrain = new Terrain(this.scene, this.game.grid, this.fog, this.biome === 'palm', this.realismAssets?.ground, this.biome === '', this.biome === 'arid');
     this.terrain.updateFog(this.game.explored, this.game.visible);
     this.configureLighting();
   }
@@ -767,11 +767,7 @@ export class Renderer {
       if (!inView(cx, cy) || !g.canSee(bl)) continue;
       const def = buildingDef(bl.t);
       const team = this.teamColors[bl.o];
-      let h = def.water ? WATER_Y : g.grid.h(cx, cy);
-      if (!def.water) {
-        // sit on the lowest corner so nothing floats
-        h = Math.min(h, g.grid.h(bl.x, bl.y), g.grid.h(bl.x + s, bl.y), g.grid.h(bl.x, bl.y + s), g.grid.h(bl.x + s, bl.y + s)) + 0.02;
-      }
+      const h = def.water ? WATER_Y : this.buildingBaseY(bl.t, bl.x, bl.y, s);
       const flash = this.view.flashIds.get(bl.id);
       const tint = flash && flash > this.time ? C_FLASH : null;
       const key = this.buildingKey(bl);
@@ -914,7 +910,7 @@ export class Renderer {
       for (const [tx, ty] of tiles) {
         const cx = tx + def.size / 2, cy = ty + def.size / 2;
         const ok = gh.tiles ? g.canPlace(g.human, gh.type, tx, ty) : gh.ok;
-        const h = def.water ? WATER_Y : g.grid.h(cx, cy);
+        const h = def.water ? WATER_Y : this.buildingBaseY(gh.type, tx, ty, def.size);
         B.add(`b:${gh.type}:${g.players[g.human].age}`, cx, h, cy, 0, 1, 1, 1, null, ok ? C_GHOST_OK : C_GHOST_BAD, 'ghost', false);
         B.add('fx:tile', cx, h + 0.04, cy, 0, def.size, 1, def.size, null, ok ? C_GHOST_OK : C_GHOST_BAD, 'ghost', false);
       }
@@ -930,6 +926,20 @@ export class Renderer {
     if (o === g.human) return C_SEL;
     if (o === 0) return C_NEUTRAL;
     return g.allied(o, g.human) ? C_ALLY : C_ENEMY;
+  }
+
+  /** Ground height a building stands at. Buildings with a yard sit on the highest point of their footprint
+   *  so no hillside cuts through them; their deep stone foundation shows on the downhill side (as in AoE4).
+   *  Thin footprints (farms, walls, gates) follow the lowest point instead so they never float. */
+  buildingBaseY(t: BuildingKey, x: number, y: number, s: number) {
+    const g = this.game, d = buildingDef(t);
+    const flat = t === 'farm' || !!d.wall;
+    let h = flat ? Infinity : -Infinity;
+    for (let i = 0; i <= 2; i++) for (let j = 0; j <= 2; j++) {
+      const v = g.grid.h(x + (s * i) / 2, y + (s * j) / 2);
+      h = flat ? Math.min(h, v) : Math.max(h, v);
+    }
+    return h + 0.02;
   }
 
   /** Town centre advancing an age: scaffolding, a working crane hoisting stone, dust and a gold progress bar. */

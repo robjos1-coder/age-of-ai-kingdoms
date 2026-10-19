@@ -15,11 +15,11 @@ function rng(seed: number) {
   return () => { v = (v * 16807) % 2147483647; return v / 2147483647; };
 }
 
-/** 1024×1024 RGBA. Top row: broadleaf cluster | conifer needle spray (v runs trunk → tip).
- *  Bottom row (painted in true colour): grass tuft | grass with wildflowers (v runs root → tip). */
+/** 1536×1024 RGBA (three 512px cells per row). Top row: broadleaf cluster | conifer needle spray (v runs trunk → tip) | spare.
+ *  Bottom row (painted in true colour): grass tuft | grass with wildflowers | sun-dried grass (v runs root → tip). */
 export function foliageTexture(): THREE.DataTexture {
   if (TEX) return TEX;
-  const W = 1024, H = 1024, S = 512;
+  const W = 1536, H = 1024, S = 512;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d')!;
@@ -83,14 +83,16 @@ export function foliageTexture(): THREE.DataTexture {
   }
 
   // --- grass tufts: tapered, curving blades in muted meadow colours; the second cell adds wildflowers
-  const blades = (ox: number, n: number, flowers: boolean) => {
+  const blades = (ox: number, n: number, flowers: boolean, arid = false) => {
     for (let i = 0; i < n; i++) {
       const bx = ox + 256 + (rnd() - 0.5) * (rnd() < 0.6 ? 150 : 300), by = 516;
       const h = 150 + rnd() * 310, lean = (rnd() - 0.5) * 170 + (bx - ox - 256) * 0.6, w = 5 + rnd() * 5;
       const tx = bx + lean, ty = by + h;
-      const dry = rnd() < 0.18;
+      const dry = rnd() < (arid ? 0.7 : 0.18);
       const v = 0.75 + rnd() * 0.5;
-      const col = dry ? [150, 138, 88] : [88 + rnd() * 30, 108 + rnd() * 30, 50 + rnd() * 18];
+      const col = arid
+        ? (dry ? [178 + rnd() * 30, 152 + rnd() * 24, 92 + rnd() * 18] : [128 + rnd() * 20, 124 + rnd() * 18, 70 + rnd() * 14])
+        : dry ? [150, 138, 88] : [88 + rnd() * 30, 108 + rnd() * 30, 50 + rnd() * 18];
       g.fillStyle = `rgb(${col.map((c) => Math.round(Math.min(255, c * v))).join(',')})`;
       g.beginPath();
       g.moveTo(bx - w, by);
@@ -112,6 +114,7 @@ export function foliageTexture(): THREE.DataTexture {
   };
   blades(0, 150, false);
   blades(512, 100, true);
+  blades(1024, 120, false, true);
 
   // Unpremultiplied pixels; bleed the mean colour into transparent texels so mipmaps don't get dark fringes.
   const img = g.getImageData(0, 0, W, H).data;
@@ -167,25 +170,27 @@ function quad(p: number[][], uv: number[][]) {
   return g;
 }
 /** Broadleaf cluster card, centred, 1×1 in the XY plane. */
-const LEAFCARD = quad([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]], [[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5]]);
+const C3 = 1 / 3;
+const LEAFCARD = quad([[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]], [[0, 0], [C3, 0], [C3, 0.5], [0, 0.5]]);
 /** Needle spray card in the XZ plane, starting at the origin and reaching +X by 1. */
-const SPRAY = quad([[0, 0, 0.5], [0, 0, -0.5], [1, 0, -0.5], [1, 0, 0.5]], [[0.5, 0], [1, 0], [1, 0.5], [0.5, 0.5]]);
+const SPRAY = quad([[0, 0, 0.5], [0, 0, -0.5], [1, 0, -0.5], [1, 0, 0.5]], [[C3, 0], [2 * C3, 0], [2 * C3, 0.5], [C3, 0.5]]);
 /** Upright spray (tree tops), base at the origin, tip at +Y. */
-const SPIRE = quad([[-0.5, 0, 0], [0.5, 0, 0], [0.5, 1, 0], [-0.5, 1, 0]], [[0.5, 0], [1, 0], [1, 0.5], [0.5, 0.5]]);
-/** Grass tuft cards, root at the origin, 1 wide and 1 tall (left: plain grass, right: with wildflowers). */
-const TUFT = [0, 0.5].map((u0) => quad([[-0.5, 0, 0], [0.5, 0, 0], [0.5, 1, 0], [-0.5, 1, 0]], [[u0, 0.5], [u0 + 0.5, 0.5], [u0 + 0.5, 1], [u0, 1]]));
+const SPIRE = quad([[-0.5, 0, 0], [0.5, 0, 0], [0.5, 1, 0], [-0.5, 1, 0]], [[C3, 0], [2 * C3, 0], [2 * C3, 0.5], [C3, 0.5]]);
+/** Grass tuft cards, root at the origin, 1 wide and 1 tall: plain grass, with wildflowers, sun-dried. */
+const TUFT = [0, C3, 2 * C3].map((u0) => quad([[-0.5, 0, 0], [0.5, 0, 0], [0.5, 1, 0], [-0.5, 1, 0]], [[u0, 0.5], [u0 + C3, 0.5], [u0 + C3, 1], [u0, 1]]));
 
 const UP = new THREE.Vector3(0, 1, 0);
 /** A clump of grass (or wildflowers): cards splayed outwards from the root like a real tussock, so the
  *  RTS camera looking down sees blades rather than thin crossed planes. Lit mostly from above like the ground. */
-export function grassTuft(mb: MB, w: number, h: number, color: Col, flowers = false, ry = 0, cards = 4) {
+/** kind: 0 green grass, 1 grass with wildflowers, 2 sun-dried grass. */
+export function grassTuft(mb: MB, w: number, h: number, color: Col, kind: 0 | 1 | 2 = 0, ry = 0, cards = 4) {
   const prev = mb.normalFn;
   mb.normalFn = (_p, n) => { n.multiplyScalar(0.3).add(UP).normalize(); };
   for (let i = 0; i < cards; i++) {
     const a = ry + (i * Math.PI * 2) / cards;
     // each card leans away from the centre (rx about its own base) and is offset a little outwards
     mb.push(Math.sin(a) * w * 0.12, 0, Math.cos(a) * w * 0.12, 0.55 + (i % 2) * 0.25, a, 0);
-    mb.add(TUFT[flowers ? 1 : 0], color, 0, 0, 0, { surface: 'foliage' }, w * (0.8 + (i % 3) * 0.15), h, 1);
+    mb.add(TUFT[kind], color, 0, 0, 0, { surface: 'foliage' }, w * (0.8 + (i % 3) * 0.15), h, 1);
     mb.pop();
   }
   mb.normalFn = prev;

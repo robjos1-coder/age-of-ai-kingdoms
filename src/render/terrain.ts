@@ -34,7 +34,8 @@ export class Terrain {
   private biomeMap: THREE.DataTexture | null = null;
   realisticWater: RealisticWater | null = null;
 
-  constructor(scene: THREE.Scene, grid: Grid, fog: FogUniforms, desert: boolean, scans?: ScanAtlas, lush = false) {
+  /** arid: Arabia — dusty dirt with patches of dry grass, sparse dry tufts and scrub, more rocks. */
+  constructor(scene: THREE.Scene, grid: Grid, fog: FogUniforms, desert: boolean, scans?: ScanAtlas, lush = false, arid = false) {
     this.grid = grid;
     const S = grid.size;
     // fog texture
@@ -57,6 +58,13 @@ export class Terrain {
     const ca = new THREE.Color(), cb = new THREE.Color();
     let seed = 1234;
     const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    /** 0 = bare dirt … 1 = dry grass: large soft patches for arid maps. */
+    const aridGrass = (x: number, y: number) => {
+      const n = 0.5 + 0.5 * Math.sin(x * 0.17 + Math.cos(y * 0.13) * 2.3) * Math.cos(y * 0.15 + Math.sin(x * 0.11) * 1.9);
+      const m = 0.5 + 0.5 * Math.sin(x * 0.41 + y * 0.29) * Math.cos(y * 0.37 - x * 0.23);
+      return Math.max(0, Math.min(1, (n * 0.75 + m * 0.25 - 0.3) * 2.4));
+    };
+    const DRY = new THREE.Color('#a8915e'), DRY2 = new THREE.Color('#b9a06a'), DRYGRASS = new THREE.Color('#8f8c4e');
     for (let i = 0; i < S * S; i++) {
       let t = grid.terrain[i];
       if (desert && t === T_GRASS) t = T_SAND;
@@ -64,6 +72,12 @@ export class Terrain {
       ca.set(a); cb.set(b);
       const x = i % S, y = (i / S) | 0;
       const n = 0.5 + 0.5 * Math.sin(x * 0.31 + Math.cos(y * 0.23) * 2) * Math.cos(y * 0.27 + Math.sin(x * 0.19));
+      if (arid && (t === T_GRASS || t === T_DIRT || t === T_FOREST)) {
+        // classic look for arid maps: dust and dry grass instead of meadow
+        const gr = t === T_DIRT ? 0 : t === T_FOREST ? 0.6 : aridGrass(x, y);
+        tileCol.push(DRY.clone().lerp(DRY2, n * 0.7 + rnd() * 0.3).lerp(DRYGRASS, gr * 0.85));
+        continue;
+      }
       tileCol.push(ca.clone().lerp(cb, n * 0.8 + rnd() * 0.2));
     }
     const c = new THREE.Color();
@@ -110,13 +124,23 @@ export class Terrain {
         const channel = t === T_DIRT ? 1 : t === T_FOREST ? 3 : [T_SAND, T_SHALLOW, T_WATER].includes(t) ? 2 : t === T_SNOW ? -1 : 0;
         if (channel >= 0) mask[i * 4 + channel] = 255;
         // AoE4 look: dirt reads as trodden patches inside living meadow, forest floor stays mossy
+        if (arid && (t === T_GRASS || t === T_DIRT || t === T_FOREST)) {
+          // Arabia: mostly dusty dirt, dry grass in soft patches, a touch of sand; dry forest floor
+          const x = i % S, y = (i / S) | 0;
+          const gr = t === T_DIRT ? 0.08 : t === T_FOREST ? 0.35 : aridGrass(x, y);
+          mask[i * 4] = Math.round(255 * gr);
+          mask[i * 4 + 1] = Math.round(255 * (1 - gr) * 0.85);
+          mask[i * 4 + 2] = Math.round(255 * (1 - gr) * 0.15);
+          mask[i * 4 + 3] = t === T_FOREST ? 150 : 0;
+          continue;
+        }
         if (!desert && t === T_DIRT) { mask[i * 4 + 1] = 95; mask[i * 4] = 160; }
         if (!desert && t === T_FOREST) { mask[i * 4 + 3] = 170; mask[i * 4] = 85; }
       }
       this.biomeMap = new THREE.DataTexture(mask, S, S);
       this.biomeMap.magFilter = this.biomeMap.minFilter = THREE.LinearFilter;
       this.biomeMap.needsUpdate = true;
-      mat = makeGroundMaterial(scans, this.biomeMap, fog, S, lush);
+      mat = makeGroundMaterial(scans, this.biomeMap, fog, S, lush, arid);
     } else {
       this.detail = makeDetailTexture();
       mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: this.detail });
@@ -161,6 +185,17 @@ export class Terrain {
       const x = i % S, y = (i / S) | 0;
       const r = rnd();
       let d: string | null = null;
+      if (arid && (t === T_GRASS || t === T_DIRT || t === T_FOREST)) {
+        // Arabia: dry tussocks where the grass patches are, scrub and stones scattered everywhere
+        const gr = t === T_DIRT ? 0 : t === T_FOREST ? 0.6 : aridGrass(x, y);
+        if (r < 0.03) d = 'rock';
+        else if (r < 0.045) d = 'scrub';
+        else if (r < 0.05 + gr * 0.32) d = 'drygrass';
+        if (scans && gr > 0.4 && rnd() < gr * 0.35) this.decos.push({ t: 'drygrass', x: x + rnd(), y: y + rnd(), v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.6 + rnd() * 0.6, hi: true });
+        if (!d) continue;
+        this.decos.push({ t: d, x: x + 0.2 + rnd() * 0.6, y: y + 0.2 + rnd() * 0.6, v: Math.floor(rnd() * 4), rot: rnd() * 6.28, s: 0.8 + rnd() * 0.5 });
+        continue;
+      }
       if (t === T_GRASS) d = desert ? (r < 0.015 ? 'cactus' : r < 0.04 ? 'rock' : null) : r < 0.09 ? 'grass' : r < 0.11 ? 'flower' : r < 0.118 ? 'rock' : r < 0.125 ? 'bush' : null;
       else if (t === T_FOREST) d = r < 0.25 ? 'grass' : r < 0.3 ? 'bush' : null;
       else if (t === T_SAND) d = r < 0.02 ? 'rock' : desert && r < 0.03 ? 'cactus' : null;

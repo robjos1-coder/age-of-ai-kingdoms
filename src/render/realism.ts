@@ -124,7 +124,7 @@ export function applyModelScans(shader: Shader, atlas: ScanAtlas, wind?: { value
       vec4 scanAlbedo = scanSample(scanColor, vScanUv, floor(vSurface + 0.5), vec2(4.0));
       vec3 scanProperties = scanSample(scanArm, vScanUv, floor(vSurface + 0.5), vec2(4.0)).rgb;
       vec4 foliageTexel = texture2D(foliageMap, vScanUv);
-      vec2 foliageTexels = vScanUv * 1024.0;
+      vec2 foliageTexels = vScanUv * vec2(1536.0, 1024.0);
       float foliageLod = log2(max(1.0, max(length(dFdx(foliageTexels)), length(dFdy(foliageTexels)))));
       if (foliageCard) {
         if (foliageTexel.a < mix(0.45, 0.16, clamp(foliageLod / 4.0, 0.0, 1.0))) discard;
@@ -164,13 +164,15 @@ export function makeRealismMaterial(atlas: ScanAtlas, fog: FogUniforms | null, w
 /** 1 on high quality: blend a rotated, larger-scale second sample into the ground to hide texture tiling. */
 export const groundDetail = { value: 1 };
 
-export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: FogUniforms, size: number, lush = false) {
+/** arid: Arabia-style sun-baked ground (khaki, desaturated grass, warmer dirt). */
+export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: FogUniforms, size: number, lush = false, arid = false) {
   const material = new THREE.MeshStandardMaterial({ map: atlas.color, normalMap: atlas.normal, roughness: 1, normalScale: new THREE.Vector2(0.85, 0.85) });
   material.onBeforeCompile = (shader) => {
     uniforms(shader, atlas);
     shader.uniforms.biomeMap = { value: mask };
     shader.uniforms.worldSize = { value: size };
     shader.uniforms.lushGround = { value: lush ? 1 : 0 };
+    shader.uniforms.aridGround = { value: arid ? 1 : 0 };
     shader.uniforms.groundDetail = groundDetail;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundPos;')
@@ -181,6 +183,7 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
         uniform sampler2D biomeMap;
         uniform float worldSize;
         uniform float lushGround;
+        uniform float aridGround;
         uniform float groundDetail;
         ${ATLAS_GLSL}
         const mat2 GROT = mat2(0.8, -0.6, 0.6, 0.8);
@@ -221,9 +224,10 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
         // sand neutral, retaining the photographic grass's local variation.
         // Muted, slightly darker olive so units (lighter, team-coloured) stand out against the field.
         float meadowW = weights.r * mix(0.4, 0.9, lushGround) * (1.0 - rock);
-        groundAlbedo *= mix(vec3(1.0), vec3(0.5, 0.7, 0.36), meadowW);
-        groundAlbedo = mix(groundAlbedo, vec3(dot(groundAlbedo, vec3(0.299, 0.587, 0.114))), 0.15 * meadowW);
-        groundAlbedo *= mix(vec3(1.0), vec3(1.08, 0.98, 0.86), weights.g * 0.6);
+        // arid maps: grass is parched khaki and heavily desaturated, dirt is warmer and dustier
+        groundAlbedo *= mix(vec3(1.0), mix(vec3(0.5, 0.7, 0.36), vec3(0.9, 0.8, 0.5), aridGround), meadowW);
+        groundAlbedo = mix(groundAlbedo, vec3(dot(groundAlbedo, vec3(0.299, 0.587, 0.114))), mix(0.15, 0.5, aridGround) * meadowW);
+        groundAlbedo *= mix(vec3(1.0), mix(vec3(1.08, 0.98, 0.86), vec3(1.16, 1.02, 0.82), aridGround), weights.g * 0.6);
         float macro = sin(vGroundPos.x * 0.23 + sin(vGroundPos.z * 0.17)) * sin(vGroundPos.z * 0.29);
         groundAlbedo *= 0.94 + macro * 0.08;
         diffuseColor.rgb *= groundAlbedo;
@@ -238,6 +242,6 @@ export function makeGroundMaterial(atlas: ScanAtlas, mask: THREE.Texture, fog: F
       `);
     applyFogToShader(shader, fog);
   };
-  material.customProgramCacheKey = () => 'realism-ground-v2';
+  material.customProgramCacheKey = () => 'realism-ground-v3';
   return material;
 }

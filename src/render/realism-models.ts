@@ -79,7 +79,7 @@ const TIER = (() => {
 // Trunk and limbs are geometry; the foliage is alpha-cut texture cards whose normals are bent outwards
 // from the crown, so it shades like a soft volume with a broken, leafy silhouette.
 
-function cardTree(mb: MB, variant: number, kind: number, lod: number) {
+function cardTree(mb: MB, variant: number, kind: number, lod: number, arid = false) {
   const rnd = random(571 + variant * 99);
   const scale = 0.9 + rnd() * 0.25;
   mb.push(0, 0, 0, 0, variant * 1.7, 0, scale);
@@ -125,7 +125,7 @@ function cardTree(mb: MB, variant: number, kind: number, lod: number) {
     };
     // dark inner mass keeps the crown from looking see-through at a distance
     mb.add(BLOBS[variant % 4], '#3a4f26', 0, crownY - 0.05, 0, { surface: 'leaf' }, rx * 0.45, ry * 0.45, rx * 0.45);
-    const cols = ['#6f8c44', '#7a964b', '#66823f', '#83a052'];
+    const cols = arid ? ['#7c8446', '#868c4c', '#727a40', '#8e9452'] : ['#6f8c44', '#7a964b', '#66823f', '#83a052'];
     const n = lod >= 3 ? 16 : 22;
     for (let i = 0; i < n; i++) {
       // fibonacci-ish spread over the upper ~3/4 of an ellipsoid, pulled towards the limb ends
@@ -166,8 +166,9 @@ function cardTree(mb: MB, variant: number, kind: number, lod: number) {
 }
 
 export function realisticTree(mb: MB, variant: number, biome: string, lod = 0) {
-  const kind = biome === 'palm' ? (variant % 3 === 0 ? 1 : 3) : variant % 3;
-  cardTree(mb, variant, kind, lod);
+  // arid (Arabia): dusty broadleaf woods instead of pine forest
+  const kind = biome === 'palm' ? (variant % 3 === 0 ? 1 : 3) : biome === 'arid' ? 1 : variant % 3;
+  cardTree(mb, variant, kind, lod, biome === 'arid');
 }
 
 export function realisticDeco(mb: MB, type: string, variant: number): boolean {
@@ -204,11 +205,28 @@ export function realisticDeco(mb: MB, type: string, variant: number): boolean {
   if (type === 'grass' || type === 'flower') {
     // painted grass cards (true colour in the texture, gentle per-variant tint)
     const tint = ['#eceedc', '#e2e8cf', '#efe8d2', '#dce3c8'][variant % 4];
-    grassTuft(mb, 0.34 + rnd() * 0.12, 0.19 + rnd() * 0.07, tint, type === 'flower', rnd() * 3, 3 + (variant % 2));
+    grassTuft(mb, 0.34 + rnd() * 0.12, 0.19 + rnd() * 0.07, tint, type === 'flower' ? 1 : 0, rnd() * 3, 3 + (variant % 2));
+    return true;
+  }
+  if (type === 'drygrass') {
+    // Arabia: sun-dried tussocks, a little taller and sparser than meadow grass
+    grassTuft(mb, 0.4 + rnd() * 0.14, 0.22 + rnd() * 0.08, ['#f2eadc', '#e8e0cc', '#f4ecd4', '#e2d8c0'][variant % 4], 2, rnd() * 3, 3 + (variant % 2));
+    return true;
+  }
+  if (type === 'scrub') {
+    // dry, sparse shrub: a few dusty olive clumps over bare twigs
+    for (let i = 0; i < 6; i++) branch(mb, new THREE.Vector3(0, 0.02, 0), new THREE.Vector3((rnd() - 0.5) * 0.36, 0.14 + rnd() * 0.12, (rnd() - 0.5) * 0.36), 0.008);
+    const tmp = new THREE.Vector3();
+    mb.normalFn = (p, n) => { tmp.set(p.x, (p.y - 0.1) * 1.3 + 0.08, p.z).normalize(); n.multiplyScalar(0.25).add(tmp).normalize(); };
+    for (let i = 0; i < 4; i++) {
+      const a = i * 2.399 + rnd(), r = 0.08 + rnd() * 0.08;
+      leafClump(mb, Math.cos(a) * r, 0.15 + rnd() * 0.06, Math.sin(a) * r, 0.2 + rnd() * 0.06, ['#8a8a58', '#949060', '#7e8050'][i % 3], rnd);
+    }
+    mb.normalFn = null;
     return true;
   }
   if (type === 'reed') {
-    grassTuft(mb, 0.36, 0.5 + rnd() * 0.15, '#c9c49c', false, rnd() * 3);
+    grassTuft(mb, 0.36, 0.5 + rnd() * 0.15, '#c9c49c', 0, rnd() * 3);
     for (let i = 0; i < 4; i++) {
       const x = (rnd() - 0.5) * 0.2, z = (rnd() - 0.5) * 0.2, h = 0.45 + rnd() * 0.2;
       mb.cyl(0.004, 0.004, h, 6, '#6b6a3a', x, h / 2, z, { surface: 'leaf' });

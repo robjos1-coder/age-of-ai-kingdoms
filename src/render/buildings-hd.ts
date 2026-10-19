@@ -49,7 +49,8 @@ const cylB = (mb: MB, rt: number, rb: number, h: number, seg: number, c: Col, x:
 // ---------------------------------------------------------------- kit
 
 function plinth(mb: MB, w: number, d: number, h = 0.1) {
-  boxB(mb, w, h + 0.4, d, K.dstone, 0, -0.4, 0, { surface: 'stone' });
+  // deep footing: on slopes the downhill side shows a built-up stone foundation
+  boxB(mb, w, h + 1.6, d, K.dstone, 0, -1.6, 0, { surface: 'stone' });
   boxB(mb, w - 0.06, 0.025, d - 0.06, '#9a8a6c', 0, h, 0, { surface: 'soil' });
 }
 
