@@ -1033,11 +1033,16 @@ export class Renderer {
     const box = new THREE.Box3().setFromObject(grp);
     box.min.y = Math.max(box.min.y, -0.05);
     if (m.rig) box.max.y = Math.min(box.max.y, m.height + 0.05);
+    // people are framed as portraits (head and shoulders; riders with the horse's head) so they read at
+    // button size; long weapons may run off the edge. Buildings crop the corners of their yard.
+    const bust = !!m.rig && !m.rig.quad;
+    if (bust) box.min.y = box.max.y - (box.max.y - box.min.y) * (m.rig!.mounted ? 0.62 : 0.5);
     const ctr = box.getCenter(new THREE.Vector3());
     const sz = box.getSize(new THREE.Vector3());
-    const r = Math.max(sz.x * 0.8, sz.y, sz.z * 0.8) * 0.56;
+    let r = bust ? Math.max(sz.y * 0.62, Math.min(sz.x, sz.z) * 0.42) : Math.max(sz.x * 0.8, sz.y, sz.z * 0.8) * 0.56;
+    if (key.startsWith('b:')) r *= /^b:(stone_wall|gate|palisade)/.test(key) ? 1.3 : 0.88;
     const cam = new THREE.OrthographicCamera(-r, r, r, -r, 0.01, 100);
-    cam.position.set(ctr.x + 3, ctr.y + 2.2, ctr.z + 3);
+    cam.position.set(ctr.x + 3, ctr.y + (bust ? 1.0 : 2.2), ctr.z + 3);
     cam.lookAt(ctr);
     const prevBg = this.scene.background;
     scene.background = null;

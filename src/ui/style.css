@@ -161,6 +161,12 @@ button { font: inherit; color: inherit; }
 .cmd .price span { display: inline-flex; align-items: center; gap: 1px; white-space: nowrap; }
 .cmd .price i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; box-shadow: 0 0 0 1px #0008; }
 .cmd .price .no { color: #ff7a66; }
+/* tier numeral for tiered research lines, gold star for civilisation techs, role badge on look-alike buildings */
+.cmd .tier { position: absolute; left: 2px; top: 1px; font: 700 10px/12px var(--title, serif); color: #ffe39a; text-shadow: 0 0 2px #000, 0 0 3px #000; }
+.cmd .uq { position: absolute; left: 2px; top: 0; font-size: 11px; color: var(--gold); text-shadow: 0 0 3px #000; }
+.cmd .role { position: absolute; left: 1px; top: 1px; width: 17px; height: 17px; border-radius: 50%; background: #1a140ccc; box-shadow: 0 0 0 1px #c9a04088; display: grid; place-items: center; }
+.cmd .role svg { width: 13px; height: 13px; filter: none; }
+.cmd .hk { z-index: 1; }
 .cmd .bar { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--gold); }
 .cmd.on { border-color: var(--gold); box-shadow: inset 0 0 8px #f0c86088; }
 .cmd:active { transform: scale(0.93); }

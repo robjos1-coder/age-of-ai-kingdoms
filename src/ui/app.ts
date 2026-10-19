@@ -7,7 +7,7 @@ import { buildingStats, canAfford, missing, techCost, unitStats } from '../sim/s
 import type { Building, GameEvent, Settings, Unit } from '../sim/types';
 import { Renderer, type Quality, type ViewState } from '../render/renderer';
 import { initAudio, music, play } from '../audio/sfx';
-import { ICON } from './icons';
+import { ICON, BUILDING_ROLE, techIcon } from './icons';
 import { Hud } from './hud';
 import { Input } from './input';
 import { Menus } from './menus';
@@ -750,7 +750,8 @@ export class App {
     const col = p.color;
     const uIcon = (t: UnitKey) => `<img src="${r.unitIcon(t, col)}">`;
     // buildings are shown in the style they will have when built (locked ones at their unlock age)
-    const bIcon = (t: BuildingKey) => t === 'farm' ? ICON.farm : `<img src="${r.icon(`b:${t}:${Math.min(4, Math.max(p.age, buildingDef(t).age))}`, col)}">`;
+    const bIcon = (t: BuildingKey) => t === 'farm' ? ICON.farm : `<img src="${r.icon(`b:${t}:${Math.min(4, Math.max(p.age, buildingDef(t).age))}`, col)}">`
+      + (BUILDING_ROLE[t] ? `<span class="role">${ICON[BUILDING_ROLE[t]]}</span>` : '');
 
     if (units.length) {
       const vils = units.filter((u) => u.t === 'villager');
@@ -834,7 +835,7 @@ export class App {
         const t = TECH_BY_ID[id];
         const cost = techCost(p, id);
         const block = g.techBlock(me, id);
-        let icon = ICON[t.icon] ?? ICON.up;
+        let icon = techIcon(id, t.icon, t.civ);
         if (t.upgrade) icon = `<img src="${r.unitIcon(t.upgrade[1], col)}"><span class="tag" style="font-size:14px">⬆</span>`;
         out.push({
           key: 't-' + id, icon, name: t.name, desc: t.desc + (t.civ ? ` (${CIVS[t.civ].name} unique)` : ''), cost, disabled: block, poor: !canAfford(p, cost), age: !!t.isAge,

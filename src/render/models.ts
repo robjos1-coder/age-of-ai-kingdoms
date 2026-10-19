@@ -636,17 +636,20 @@ function buildBuilding(mb: MB, t: string, tier: number, variant = 0) {
       break;
     }
     case 'stone_wall': {
-      mb.boxB(1.0, 1.0, 1.0, st.wall2, 0, -0.2, 0);
+      // always stone, even before the Castle Age palette (wall2 is timber in the early styles)
+      const sc = tier <= 2 ? '#9d968a' : st.wall2;
+      mb.boxB(1.0, 1.0, 1.0, sc, 0, -0.2, 0, { surface: 'stone' });
       mb.boxB(1.04, 0.15, 1.04, st.base, 0, -0.2, 0);
-      for (const [x, z] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) mb.boxB(0.22, 0.2, 0.22, st.wall2, x, 0.8, z);
+      for (const [x, z] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]]) mb.boxB(0.22, 0.2, 0.22, sc, x, 0.8, z, { surface: 'stone' });
       break;
     }
     case 'gate': {
+      const sc = tier <= 2 ? '#9d968a' : st.wall2;
       for (const s of [-1, 1]) {
-        mb.boxB(1.0, 1.4, 0.32, st.wall2, 0, -0.2, 0.34 * s);
-        crenels(mb, 1.0, 0.32, 1.2, st.wall2, 0.12);
+        mb.boxB(1.0, 1.4, 0.32, sc, 0, -0.2, 0.34 * s, { surface: 'stone' });
+        crenels(mb, 1.0, 0.32, 1.2, sc, 0.12);
       }
-      mb.boxB(1.0, 0.35, 1.0, st.wall2, 0, 0.85, 0);
+      mb.boxB(1.0, 0.35, 1.0, sc, 0, 0.85, 0, { surface: 'stone' });
       mb.box(1.02, 0.25, 0.4, C.team, 0, 0.75, 0, { team: true });
       mb.boxB(0.06, 0.8, 0.36, '#3a2a1c', 0.3, -0.05, 0);
       break;
